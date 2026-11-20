@@ -190,3 +190,7 @@ export function evaluateJobFit(job) {
     }
   };
 }
+
+export function evaluateJobs(jobs) {
+  return (jobs || []).map(j => evaluateJobFit(j));
+}

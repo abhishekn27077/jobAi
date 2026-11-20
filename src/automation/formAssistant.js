@@ -4,12 +4,30 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { loadCandidateProfile } from '../profile/profileManager.js';
 import { exportTailoredDocumentsForJob } from '../resumes/resumeGenerator.js';
+import { getPortalAdapter } from './portalAdapters/portalRegistry.js';
+import { generateScreeningAnswers } from './screeningEngine.js';
+import { updateApplicationStatus } from '../tracker/applicationTracker.js';
 import { getDatabase } from '../db/schema.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export async function launchFormAssistant(job, options = {}) {
+  const {
+    userConfirmedApproval = false,
+    resumePdfPath = null,
+    screeningAnswers = null,
+    headless = false
+  } = options;
+
+  // STRICT HUMAN APPROVAL GATE:
+  // Cannot launch browser form filling without explicit user confirmation
+  if (!userConfirmedApproval) {
+    const error = new Error('Human Approval Gate: You must explicitly approve the application preparation and proposed answers before launching the browser assistant.');
+    error.code = 'APPROVAL_REQUIRED';
+    throw error;
+  }
+
   const profile = loadCandidateProfile();
   const db = getDatabase();
 
@@ -17,23 +35,26 @@ export async function launchFormAssistant(job, options = {}) {
   console.log(`[Form Assistant] Target URL: ${job.url}`);
 
   // 1. Ensure Tailored Resume PDF is ready
-  console.log('[Form Assistant] Generating tailored ATS resume PDF...');
-  const docs = await exportTailoredDocumentsForJob(job);
-  const pdfPath = docs.resumePdfPath;
+  let pdfPath = resumePdfPath;
+  if (!pdfPath || !fs.existsSync(pdfPath)) {
+    console.log('[Form Assistant] Generating tailored ATS resume PDF...');
+    const docs = await exportTailoredDocumentsForJob(job);
+    pdfPath = docs.resumePdfPath;
+  }
 
-  // 2. Launch Visible Google Chrome
-  console.log('[Form Assistant] Launching visible Chrome browser (Human-in-the-Loop)...');
+  // 2. Launch Google Chrome (Human-in-the-Loop)
+  console.log(`[Form Assistant] Launching browser (Headless: ${headless})...`);
   let browser;
   try {
     browser = await chromium.launch({
       channel: 'chrome',
-      headless: false,
+      headless,
       args: ['--start-maximized']
     });
   } catch {
     browser = await chromium.launch({
       channel: 'msedge',
-      headless: false,
+      headless,
       args: ['--start-maximized']
     });
   }
@@ -48,51 +69,51 @@ export async function launchFormAssistant(job, options = {}) {
     console.warn(`[Form Assistant] Initial navigation notice: ${err.message}`);
   }
 
-  // 3. Inject Assistant Banner & Auto-Fill Known Fields
+  // 3. Detect Portal & Check Barriers
+  const adapter = getPortalAdapter(job.url);
+  const barrierCheck = await adapter.detectSessionOrAuthBarrier(page);
+  if (barrierCheck.hasBarrier) {
+    console.warn(`[Form Assistant Notice] ${barrierCheck.message}`);
+  }
+
+  // 4. Inject Assistant Banner & Auto-Fill Approved Fields
   try {
-    // Wait for form elements or body
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(1500);
 
-    const fillResult = await autoFillApplicationForm(page, profile, pdfPath);
-    console.log(`[Form Assistant] Auto-filled ${fillResult.fieldsFilled} standard fields.`);
+    const answers = screeningAnswers || generateScreeningAnswers(job);
+    const fillResult = await autoFillApplicationForm(page, profile, pdfPath, { screeningAnswers: answers, adapter });
+    console.log(`[Form Assistant] Auto-filled ${fillResult.fieldsFilled} standard fields using ${adapter.name} adapter.`);
 
-    // 4. Record action in Career Vault
-    db.prepare(`
-      INSERT INTO applications (job_id, portal_type, resume_version, applied_date, user_approved, notes)
-      VALUES (?, ?, ?, datetime('now'), 0, ?)
-      ON CONFLICT(job_id) DO UPDATE SET
-        resume_version = excluded.resume_version,
-        notes = excluded.notes,
-        created_at = datetime('now')
-    `).run(
-      job.id,
-      detectPortalType(job.url),
-      path.basename(pdfPath),
-      `Form Assistant launched. Resume: ${path.basename(pdfPath)}`
-    );
+    // 5. Update Application Tracker to 'ready_for_review'
+    try {
+      updateApplicationStatus(job.id, 'ready_for_review', {
+        notes: `Form Assistant filled ${fillResult.fieldsFilled} fields via ${adapter.name}. Verification: ${JSON.stringify(fillResult.verification || [])}`
+      });
+    } catch {}
 
     db.prepare(`
       INSERT INTO activity_audit_log (action, details)
       VALUES (?, ?)
     `).run(
       'FORM_ASSISTANT_LAUNCHED',
-      `Launched Playwright form assistant for Job #${job.id} (${job.title} @ ${job.company}). Pre-filled ${fillResult.fieldsFilled} fields.`
+      `Launched Playwright form assistant for Job #${job.id} (${job.title} @ ${job.company}). Pre-filled ${fillResult.fieldsFilled} fields. Portal: ${adapter.name}. Verification matches: ${(fillResult.verification || []).filter(v => v.status === 'verified_match').length}`
     );
-
-    // Update job status to 'ready_to_apply'
-    db.prepare(`UPDATE jobs SET status = 'ready_to_apply', updated_at = datetime('now') WHERE id = ?`).run(job.id);
 
     console.log('\n================================================================');
     console.log('✅ Form Assistant is standing by in your open Chrome browser!');
-    console.log('👉 Please review the pre-filled fields, answer custom questions,');
-    console.log('   and click "Submit Application" when you are satisfied.');
+    console.log('👉 Please review the pre-filled fields, verify all data,');
+    console.log('   and click "Submit Application" manually when satisfied.');
     console.log('================================================================\n');
 
     return {
       success: true,
       jobId: job.id,
+      portal: adapter.name,
+      supportLevel: adapter.getSupportLevel(),
       fieldsFilled: fillResult.fieldsFilled,
+      verification: fillResult.verification,
       resumePdfPath: pdfPath,
+      barrier: barrierCheck.hasBarrier ? barrierCheck : null,
       browser,
       page
     };
@@ -107,12 +128,13 @@ export async function launchFormAssistant(job, options = {}) {
   }
 }
 
-export async function autoFillApplicationForm(page, profile, pdfPath) {
-  const p = profile.personal;
-  let fieldsFilled = 0;
+export async function autoFillApplicationForm(page, profile, pdfPath, options = {}) {
+  const currentUrl = page.url() || '';
+  const adapter = options.adapter || getPortalAdapter(currentUrl);
 
   // Inject helper notification banner at top of page
   await page.evaluate(() => {
+    if (document.getElementById('careeros-assistant-banner')) return;
     const banner = document.createElement('div');
     banner.id = 'careeros-assistant-banner';
     banner.style.position = 'fixed';
@@ -131,105 +153,29 @@ export async function autoFillApplicationForm(page, profile, pdfPath) {
     banner.style.alignItems = 'center';
     banner.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
     banner.innerHTML = `
-      <span>🎯 <strong>CareerOS Assistant:</strong> Verified profile details pre-filled. Review inputs & submit manually.</span>
+      <span>🎯 <strong>CareerOS Assistant:</strong> Verified profile details pre-filled. Human review required — click Submit manually when ready.</span>
       <button style="background: rgba(255,255,255,0.2); border: 1px solid #fff; color: #fff; padding: 2px 8px; border-radius: 4px; cursor: pointer;" onclick="this.parentElement.remove()">Dismiss Banner</button>
     `;
     document.body.prepend(banner);
   }).catch(() => {});
 
-  // Field selector heuristics mapping to verified profile data
-  const fieldMappings = [
-    {
-      selectors: ['input[name*="first_name" i]', 'input[id*="first_name" i]', 'input[autocomplete="given-name"]'],
-      value: p.fullName.split(' ')[0]
-    },
-    {
-      selectors: ['input[name*="last_name" i]', 'input[id*="last_name" i]', 'input[autocomplete="family-name"]'],
-      value: p.fullName.split(' ').slice(1).join(' ') || p.fullName
-    },
-    {
-      selectors: ['input[name="name" i]', 'input[id="name" i]', 'input[name*="full_name" i]', 'input[id*="full_name" i]', 'input[autocomplete="name"]'],
-      value: p.fullName
-    },
-    {
-      selectors: ['input[type="email"]', 'input[name*="email" i]', 'input[id*="email" i]', 'input[autocomplete="email"]'],
-      value: p.email
-    },
-    {
-      selectors: ['input[type="tel"]', 'input[name*="phone" i]', 'input[id*="phone" i]', 'input[name*="mobile" i]', 'input[autocomplete="tel"]'],
-      value: p.phone
-    },
-    {
-      selectors: ['input[name*="linkedin" i]', 'input[id*="linkedin" i]', 'input[placeholder*="linkedin" i]'],
-      value: p.linkedIn
-    },
-    {
-      selectors: ['input[name*="github" i]', 'input[id*="github" i]', 'input[placeholder*="github" i]'],
-      value: p.gitHub
-    },
-    {
-      selectors: ['input[name*="portfolio" i]', 'input[name*="website" i]', 'input[id*="website" i]', 'input[placeholder*="website" i]'],
-      value: p.portfolio
-    },
-    {
-      selectors: ['input[name*="city" i]', 'input[id*="city" i]', 'input[name*="location" i]', 'input[id*="location" i]'],
-      value: 'Bangalore, India'
-    }
-  ];
+  const mappedData = adapter.mapProfileToFields(profile);
 
-  for (const mapping of fieldMappings) {
-    for (const selector of mapping.selectors) {
-      try {
-        const el = await page.$(selector);
-        if (el && await el.isVisible()) {
-          const currentVal = await el.inputValue().catch(() => '');
-          if (!currentVal) {
-            await el.fill(mapping.value);
-            fieldsFilled++;
-            break; // Stop after filling first matching selector for this field
-          }
-        }
-      } catch {}
-    }
-  }
+  // Execute adapter filling
+  const fillResult = await adapter.fill(page, mappedData, {
+    resumePdfPath: pdfPath,
+    screeningAnswers: options.screeningAnswers || {}
+  });
 
-  // Handle Resume File Input
-  try {
-    const fileInputs = await page.$$('input[type="file"]');
-    if (fileInputs.length > 0 && fs.existsSync(pdfPath)) {
-      // Find file input that mentions resume or CV
-      let resumeInput = fileInputs[0];
-      for (const fi of fileInputs) {
-        const nameAttr = await fi.getAttribute('name') || '';
-        const idAttr = await fi.getAttribute('id') || '';
-        if (/resume|cv/i.test(nameAttr + idAttr)) {
-          resumeInput = fi;
-          break;
-        }
-      }
-      await resumeInput.setInputFiles(pdfPath);
-      fieldsFilled++;
-      console.log(`[Form Assistant] Attached tailored resume: ${path.basename(pdfPath)}`);
-    }
-  } catch (err) {
-    console.warn(`[Form Assistant Notice]: Could not auto-attach file input (${err.message})`);
-  }
-
-  return { fieldsFilled };
+  return {
+    fieldsFilled: fillResult.fieldsFilledCount || (fillResult.filledFields ? fillResult.filledFields.length : 0),
+    filledFields: fillResult.filledFields || [],
+    verification: fillResult.verification || [],
+    portal: adapter.name
+  };
 }
 
-function detectPortalType(url) {
-  if (!url) return 'direct';
-  const u = url.toLowerCase();
-  if (u.includes('greenhouse.io')) return 'greenhouse';
-  if (u.includes('lever.co')) return 'lever';
-  if (u.includes('myworkdayjobs.com') || u.includes('workday')) return 'workday';
-  if (u.includes('smartrecruiters.com')) return 'smartrecruiters';
-  if (u.includes('ashbyhq.com')) return 'ashby';
-  if (u.includes('freshteam.com')) return 'freshteam';
-  if (u.includes('zohorecruit.com') || u.includes('zohorecruit.in')) return 'zoho';
-  if (u.includes('cutshort.io')) return 'cutshort';
-  if (u.includes('hirist.tech')) return 'hirist';
-  if (u.includes('instahyre.com')) return 'instahyre';
-  return 'direct';
+export function detectPortalType(url) {
+  const adapter = getPortalAdapter(url);
+  return adapter.name.toLowerCase().replace(/[^a-z0-9]/g, '');
 }

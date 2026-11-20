@@ -16,6 +16,27 @@ import { extractJdRequirements } from './resumes/jdAnalyzer.js';
 import { generateStudioResume } from './resumes/resumeStudioService.js';
 import { saveResumeVersion } from './resumes/resumeVersionManager.js';
 import { isGmailConfigured, isGmailAuthenticated, getGoogleAuthUrl, exchangeCodeForTokens } from './email/gmailOAuthClient.js';
+import { syncRecruiterEmails } from './email/emailSyncService.js';
+import { getReminders } from './tracker/followUpManager.js';
+import { getCalendarEvents } from './calendar/calendarService.js';
+import { analyzeSkillGaps, getSkillRoadmap, updateSkillRoadmapItem } from './intelligence/skillGapService.js';
+import { getAllStories, getStoriesByCategory, searchStories } from './intelligence/storyBankService.js';
+import { getApplicationAnalytics, getRejectionAnalysis } from './intelligence/careerAnalyticsService.js';
+import { calculateOfferTakeHome, compareOffers } from './intelligence/salaryCalculatorService.js';
+import {
+  getAutomationControlStatus,
+  executeTask,
+  toggleTaskEnabled,
+  updateTaskInterval,
+  setMasterAutomationPause
+} from './scheduler/automationEngine.js';
+import {
+  backupDatabase,
+  listBackups,
+  restoreDatabase,
+  runDatabaseIntegrityCheck,
+  exportCandidateFullArchive
+} from './db/backupService.js';
 import { getDatabase } from './db/schema.js';
 
 const args = process.argv.slice(2);
@@ -319,6 +340,314 @@ async function main() {
       break;
     }
 
+    case 'sync-comms': {
+      console.log('\n--- CareerOS: Synchronizing Recruiter Communications & Calendar ---');
+      const syncResult = await syncRecruiterEmails();
+      if (!syncResult.success) {
+        console.log(`Sync status: ${syncResult.error || 'Failed'}`);
+        if (syncResult.requiresAuth) {
+          console.log(`To connect your Google account, run: node src/cli.js auth-gmail\n`);
+        }
+      } else {
+        console.log(`Messages found in query: ${syncResult.messagesFound}`);
+        console.log(`Messages imported: ${syncResult.messagesImported}`);
+        console.log(`Duplicates skipped: ${syncResult.messagesSkippedDuplicate}`);
+        console.log(`Interviews detected: ${syncResult.interviewsDetected}`);
+        console.log(`Assessments detected: ${syncResult.assessmentsDetected}\n`);
+      }
+      break;
+    }
+
+    case 'comms': {
+      const db = getDatabase();
+      const emails = db.prepare(`
+        SELECT c.*, j.company as job_company, j.title as job_title
+        FROM communications c
+        LEFT JOIN jobs j ON c.job_id = j.id
+        WHERE c.direction = 'incoming'
+        ORDER BY c.id DESC LIMIT 10
+      `).all();
+
+      const events = getCalendarEvents({ status: null, limit: 5 });
+      const reminders = getReminders({ status: 'pending', limit: 5 });
+
+      console.log('\n📬 RECENT RECRUITER COMMUNICATIONS:');
+      if (emails.length === 0) {
+        console.log('   (No recruiter emails synchronized yet)');
+      } else {
+        emails.forEach(e => {
+          console.log(`   [${e.category}] ${e.sender || 'Recruiter'} - ${e.subject}`);
+          console.log(`     Next action: ${e.action_item || 'None'} | Urgency: ${e.urgency}`);
+        });
+      }
+
+      console.log('\n📅 UPCOMING INTERVIEWS / EVENTS:');
+      if (events.length === 0) {
+        console.log('   (No scheduled interview events)');
+      } else {
+        events.forEach(ev => {
+          console.log(`   [${ev.status.toUpperCase()}] ${ev.title} (${ev.start_time} - ${ev.end_time})`);
+          if (ev.meeting_link) console.log(`     Link: ${ev.meeting_link}`);
+        });
+      }
+
+      console.log('\n⏰ PENDING FOLLOW-UP REMINDERS:');
+      if (reminders.length === 0) {
+        console.log('   (No pending reminders)');
+      } else {
+        reminders.forEach(r => {
+          console.log(`   [#${r.id}] ${r.title} (Due: ${r.due_date}) - ${r.notes || ''}`);
+        });
+      }
+      console.log('');
+      break;
+    }
+
+    case 'skill-gaps': {
+      console.log('\n--- CareerOS: Skill Gap Intelligence ---');
+      const gaps = analyzeSkillGaps({ limit: 50 });
+      console.log(`Jobs Analyzed: ${gaps.totalJobsAnalyzed}`);
+      console.log(`Verified Strengths: ${gaps.summary.existingCount} | Partially Demonstrated: ${gaps.summary.partialCount} | Missing Gaps: ${gaps.summary.missingCount}\n`);
+
+      console.log('🎯 TOP HIGH-DEMAND MISSING SKILLS:');
+      gaps.topGaps.forEach((g, i) => {
+        console.log(`  ${i + 1}. [${g.priority.toUpperCase()}] ${g.skill.toUpperCase()} (Demand: ${g.totalDemand} JDs, ${g.marketPercentage}%)`);
+        console.log(`     Category: ${g.category} | Mandatory Demand: ${g.mandatoryDemand}`);
+        console.log(`     Project Idea: ${g.recommendedProject}`);
+      });
+      console.log('');
+      break;
+    }
+
+    case 'roadmap': {
+      console.log('\n--- CareerOS: Priority Learning Roadmap ---');
+      const roadmap = getSkillRoadmap();
+      roadmap.forEach((item, i) => {
+        const badge = item.status === 'acquired' ? '✅' : item.status === 'in_progress' ? '🔄' : '⏳';
+        console.log(`  ${i + 1}. ${badge} [${item.priority.toUpperCase()}] ${item.skillName.toUpperCase()} — Status: ${item.status.toUpperCase()}`);
+        console.log(`     Recommended Project: ${item.recommendedProjectIdea || 'Build working prototype'}`);
+        if (item.verifiedEvidence) console.log(`     Evidence: ${item.verifiedEvidence}`);
+      });
+      console.log('\nStrict Rule: Never mark a skill as acquired without verified proof.');
+      console.log('To update: node src/cli.js roadmap-update <skill> --status=acquired --evidence="Built NearVia docker-compose"\n');
+      break;
+    }
+
+    case 'roadmap-update': {
+      const skill = args[1];
+      if (!skill) {
+        console.error('Error: Please provide a skill name. Example: node src/cli.js roadmap-update docker --status=acquired --evidence="Containerized NearVia"');
+        process.exit(1);
+      }
+      const statusArg = args.find(a => a.startsWith('--status='));
+      const evidenceArg = args.find(a => a.startsWith('--evidence='));
+      const status = statusArg ? statusArg.split('=')[1] : 'in_progress';
+      const evidence = evidenceArg ? evidenceArg.split('=')[1] : null;
+
+      try {
+        const updated = updateSkillRoadmapItem(skill, { status, verifiedEvidence: evidence });
+        console.log(`\n✅ Updated Roadmap Item: ${updated.skillName} -> ${updated.status}`);
+        if (updated.verifiedEvidence) console.log(`Evidence Recorded: ${updated.verifiedEvidence}\n`);
+      } catch (err) {
+        console.error(`\n❌ Error: ${err.message}\n`);
+        process.exit(1);
+      }
+      break;
+    }
+
+    case 'stories': {
+      console.log('\n--- CareerOS: STAR Interview Story Bank ---');
+      const queryArg = args.find(a => a.startsWith('--query='));
+      const catArg = args.find(a => a.startsWith('--category='));
+      const query = queryArg ? queryArg.split('=')[1] : null;
+      const cat = catArg ? catArg.split('=')[1] : null;
+
+      let stories = [];
+      if (query) stories = searchStories(query);
+      else if (cat) stories = getStoriesByCategory(cat);
+      else stories = getAllStories();
+
+      stories.forEach((s, idx) => {
+        console.log(`\n[Story ${idx + 1}] "${s.title}" (${s.contextSource})`);
+        console.log(`Category: ${s.category} | Tech: ${s.technologies}`);
+        console.log(`  S (Situation): ${s.situation}`);
+        console.log(`  T (Task):      ${s.task}`);
+        console.log(`  A (Action):    ${s.action}`);
+        console.log(`  R (Result):    ${s.result}`);
+        if (s.applicableQuestions?.length > 0) {
+          console.log(`  Target Qs:     ${s.applicableQuestions[0]}`);
+        }
+      });
+      console.log('');
+      break;
+    }
+
+    case 'analytics': {
+      console.log('\n--- CareerOS: Application Funnel & Rejection Intelligence ---');
+      const analytics = getApplicationAnalytics();
+      const rejections = getRejectionAnalysis();
+
+      console.log(`Total Applications: ${analytics.totalApplications} | Submitted: ${analytics.totalSubmitted}`);
+      if (analytics.hasSmallSampleWarning) {
+        console.log(`⚠️  ${analytics.smallSampleWarning}`);
+      }
+      console.log(`\n📊 Conversion Metrics:`);
+      console.log(`  Response Rate:            ${analytics.metrics.responseRatePct}%`);
+      console.log(`  Interview Conversion:     ${analytics.metrics.interviewConversionRatePct}%`);
+      console.log(`  Offer Rate:               ${analytics.metrics.offerRatePct}%`);
+      if (analytics.metrics.averageResponseDays !== null) {
+        console.log(`  Avg Response Time:        ${analytics.metrics.averageResponseDays} days`);
+      }
+
+      console.log(`\n🛑 Rejection Pattern Breakdown:`);
+      console.log(`  Known (Explicit Recruiter Reason): ${rejections.knownRejectionsCount}`);
+      console.log(`  Inferred Hypotheses:               ${rejections.inferredPossibilitiesCount}`);
+      if (rejections.topRepeatedGaps.length > 0) {
+        console.log(`  Top Repeated Skill Gaps in JDs:`);
+        rejections.topRepeatedGaps.forEach(g => console.log(`    - ${g.skill.toUpperCase()}: ${g.count} time(s)`));
+      }
+      console.log(`\n💡 Recommended Action Items:`);
+      rejections.actionRecommendations.forEach(r => console.log(`  • ${r}`));
+      console.log('');
+      break;
+    }
+
+    case 'salary': {
+      const ctcArg = args.find(a => a.startsWith('--ctc='));
+      const locArg = args.find(a => a.startsWith('--location='));
+      const modeArg = args.find(a => a.startsWith('--mode='));
+      const ctc = ctcArg ? parseInt(ctcArg.split('=')[1], 10) : 450000;
+      const location = locArg ? locArg.split('=')[1] : 'Bengaluru';
+      const mode = modeArg ? modeArg.split('=')[1] : 'onsite';
+
+      console.log(`\n--- CareerOS: Indian Salary & Take-Home Calculator ---`);
+      const calc = calculateOfferTakeHome({ ctcAnnual: ctc, location, workMode: mode });
+
+      console.log(`Annual CTC:                  ₹${calc.ctcAnnual.toLocaleString('en-IN')}`);
+      console.log(`Fixed Compensation:          ₹${calc.fixedPayAnnual.toLocaleString('en-IN')}/year`);
+      console.log(`Work Location & Mode:        ${calc.location} (${calc.workMode.toUpperCase()})`);
+      console.log(`------------------------------------------------------`);
+      console.log(`Monthly Gross Pay:           ₹${calc.monthlyBreakdown.grossPay.toLocaleString('en-IN')}`);
+      console.log(`  - EPF (Provident Fund):    ₹${calc.monthlyBreakdown.epfDeduction.toLocaleString('en-IN')}`);
+      console.log(`  - Professional Tax:        ₹${calc.monthlyBreakdown.professionalTax.toLocaleString('en-IN')}`);
+      console.log(`  - Income Tax (TDS est):    ₹${calc.monthlyBreakdown.incomeTaxTds.toLocaleString('en-IN')}`);
+      console.log(`Estimated Monthly In-Hand:   ₹${calc.monthlyBreakdown.netInHand.toLocaleString('en-IN')}`);
+      console.log(`Est. Living Expenses:        ₹${calc.costOfLiving.estimatedMonthlyExpense.toLocaleString('en-IN')}/mo`);
+      console.log(`Est. Net Monthly Savings:    ₹${calc.costOfLiving.estimatedNetMonthlySavings.toLocaleString('en-IN')}/mo`);
+      console.log(`------------------------------------------------------`);
+      console.log(`Assumptions & Disclaimers:`);
+      calc.assumptions.forEach(a => console.log(`  • ${a}`));
+      console.log(`\n${calc.disclaimer}\n`);
+      break;
+    }
+
+    case 'automation': {
+      console.log(`\n======================================================`);
+      console.log(`⚙️ CAREEROS UNIFIED AUTOMATION ENGINE`);
+      console.log(`======================================================\n`);
+
+      const status = getAutomationControlStatus();
+      console.log(`Master Engine Status: ${status.isEnginePaused ? '⏸️ PAUSED' : '⚡ ACTIVE'}`);
+      console.log(`Running Locks:        ${status.runningLocks.length > 0 ? status.runningLocks.join(', ') : 'None (Idle)'}\n`);
+
+      console.log('--- SCHEDULED AUTOMATION TASKS ---');
+      status.tasks.forEach(t => {
+        const flag = t.is_enabled ? '🟢 ENABLED' : '⚪ DISABLED';
+        const failText = t.failure_count > 0 ? ` (⚠️ ${t.failure_count} failures)` : '';
+        console.log(`• [${t.task_key}] - ${t.task_name} [${flag}]${failText}`);
+        console.log(`    Interval: Every ${t.interval_minutes} mins | Next: ${t.next_run_at || 'Pending'}`);
+        console.log(`    Last Run: ${t.last_run_at || 'Never'} [${t.last_status || 'IDLE'}]`);
+        if (t.last_error) console.log(`    Last Error: ${t.last_error}`);
+      });
+
+      if (status.recentRuns.length > 0) {
+        console.log('\n--- RECENT RUN TELEMETRY (Last 5) ---');
+        status.recentRuns.slice(0, 5).forEach(r => {
+          console.log(`  [${r.status}] ${r.task_key} (${r.duration_ms}ms) at ${r.started_at}`);
+          if (r.error_message) console.log(`      Error: ${r.error_message}`);
+        });
+      }
+      console.log('');
+      break;
+    }
+
+    case 'run-task': {
+      const taskKey = args[1];
+      if (!taskKey) {
+        console.error('Error: Please provide a task key. Example: node src/cli.js run-task job_discovery');
+        process.exit(1);
+      }
+      console.log(`Executing background task [${taskKey}] manually...`);
+      const result = await executeTask(taskKey, { manualTrigger: true });
+      console.log(`\n✅ Task Execution Complete: [${result.status}] in ${result.durationMs}ms`);
+      if (result.summary) console.log('Summary:', JSON.stringify(result.summary, null, 2));
+      if (result.error) console.log('Error:', result.error);
+      break;
+    }
+
+    case 'backup': {
+      const labelArg = args.find(a => a.startsWith('--label='));
+      const label = labelArg ? labelArg.split('=')[1] : 'cli_manual';
+      console.log(`Creating SQLite database backup snapshot (label: ${label})...`);
+      const res = backupDatabase({ label });
+      console.log(`\n✅ Database Backup Succeeded:`);
+      console.log(`- Path:      ${res.backupPath}`);
+      console.log(`- Size:      ${(res.sizeBytes / 1024).toFixed(1)} KB`);
+      console.log(`- Timestamp: ${res.timestamp}\n`);
+      break;
+    }
+
+    case 'backups': {
+      const list = listBackups();
+      console.log(`\nFound ${list.length} snapshots in data/backups/:\n`);
+      list.forEach(b => {
+        console.log(`• ${b.filename} (${(b.size_bytes / 1024).toFixed(1)} KB) - ${b.created_at} [${b.label}]`);
+      });
+      console.log('');
+      break;
+    }
+
+    case 'restore': {
+      const backupPath = args[1];
+      const force = args.includes('--force');
+      if (!backupPath) {
+        console.error('Error: Please provide backup file path. Example: node src/cli.js restore data/backups/careeros_backup_xxx.db --force');
+        process.exit(1);
+      }
+      if (!force) {
+        console.error('Safety Guard: Restoring will overwrite the current database. Pass --force to confirm.');
+        process.exit(1);
+      }
+      console.log(`Restoring database from ${backupPath}...`);
+      const res = restoreDatabase({ backupPath, userConfirmed: true });
+      console.log(`\n✅ Database Restored Successfully:`);
+      console.log(`- Source:   ${res.restoredFrom}`);
+      console.log(`- Restored: ${res.restoredTo}`);
+      console.log(`- Time:     ${res.timestamp}\n`);
+      break;
+    }
+
+    case 'db-check': {
+      console.log('Running SQLite PRAGMA integrity and foreign key checks...');
+      const check = runDatabaseIntegrityCheck();
+      console.log(`\nResult: ${check.ok ? '✅ PASS' : '❌ FAIL'}`);
+      console.log(`Message: ${check.message}`);
+      if (check.details) console.log('Details:', check.details);
+      console.log('');
+      break;
+    }
+
+    case 'export-archive': {
+      console.log('Exporting full candidate career data archive to JSON...');
+      const archive = exportCandidateFullArchive();
+      console.log(`\n✅ Candidate Data Archive Exported:`);
+      console.log(`- Export Path:     ${archive.exportPath}`);
+      console.log(`- Candidate:       ${archive.profile.name} (${archive.profile.targetRole})`);
+      console.log(`- Records Exported: ${archive.recordCounts.jobs} jobs, ${archive.recordCounts.applications} applications, ${archive.recordCounts.stories} stories`);
+      console.log(`- Generated:       ${archive.exportedAt}\n`);
+      break;
+    }
+
     case 'help':
     default: {
       console.log(`
@@ -336,7 +665,21 @@ CareerOS CLI Commands:
   node src/cli.js verify-links [--limit=20]       Verify job links & flag closed/expired ghost postings
   node src/cli.js export                          Export full pipeline to CSV and JSON files
   node src/cli.js schedule [--interval=24]        Run automated recurring background job scanner
-  node src/cli.js auth-gmail                      Setup official Gmail OAuth integration
+  node src/cli.js auth-gmail                      Setup official Google OAuth integration (Gmail & Calendar)
+  node src/cli.js sync-comms                      Synchronize recruiter emails, calendar events & reminders
+  node src/cli.js comms                           View recent recruiter emails, interviews & reminders
+  node src/cli.js skill-gaps                      Analyze market skill demand vs candidate profile
+  node src/cli.js roadmap                         View prioritized learning roadmap and progress
+  node src/cli.js stories [--query="..."]         Browse STAR interview story bank
+  node src/cli.js analytics                       View application funnel & rejection pattern intelligence
+  node src/cli.js salary [--ctc=450000]           Estimate Indian take-home pay, taxes & savings
+  node src/cli.js automation                      View automation engine tasks, backoff and telemetry
+  node src/cli.js run-task <key>                  Execute background task manually with error handling
+  node src/cli.js backup [--label=...]            Create point-in-time SQLite snapshot in data/backups/
+  node src/cli.js backups                         List all local database snapshots
+  node src/cli.js restore <path> --force          Safely restore database from snapshot
+  node src/cli.js db-check                        Execute PRAGMA integrity and foreign key validation
+  node src/cli.js export-archive                  Export complete candidate career data archive to JSON
   node src/cli.js serve [--port=3000]             Launch the interactive local dashboard
       `);
       break;

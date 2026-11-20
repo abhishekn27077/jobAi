@@ -24,6 +24,12 @@
     </div>
     <div class="nav-actions">
       <button class="btn btn-outline" id="viewProfileBtn" title="View Verified Candidate Profile">👤 Profile</button>
+      <button class="btn btn-outline" id="viewApplicationsBtn" title="View Active Applications Pipeline">📝 Applications</button>
+      <button class="btn btn-outline" id="commsHubBtn" title="View Recruiter Communications & Calendar Hub">📬 Comms & Calendar</button>
+      <button class="btn btn-outline" id="careerIntelBtn" title="View Career Intelligence & Growth">📈 Career Intelligence</button>
+      <button class="btn btn-outline" id="automationBackupBtn" title="Automation Engine & Local Backups">⚙️ Automation & Backup</button>
+      <button class="btn btn-outline" id="portalMatrixBtn" title="View Supported ATS Portals">🌐 Portals</button>
+      <button class="btn btn-outline" id="scanHistoryBtn" title="View Scan History & Telemetry">📜 History</button>
       <button class="btn btn-outline" id="verifyLinksBtn" title="Audit links and detect ghost jobs">🔍 Audit Links</button>
       <button class="btn btn-outline" id="exportCsvBtn" title="Export pipeline to CSV">📊 CSV</button>
       <button class="btn btn-outline" id="exportJsonBtn" title="Export pipeline to JSON">📁 JSON</button>
@@ -64,6 +70,56 @@
       </div>
       <div class="search-box">
         <input type="text" id="searchInput" placeholder="Search title, company, or skill..." />
+      </div>
+    </section>
+
+    <!-- Advanced Discovery Filters -->
+    <section class="discovery-filters-bar">
+      <div class="filter-select-wrapper">
+        <label for="sourceSelect">Source:</label>
+        <select id="sourceSelect" class="filter-select">
+          <option value="all">All Sources</option>
+          <option value="lever">Lever</option>
+          <option value="ashby">Ashby</option>
+          <option value="smartrecruiters">SmartRecruiters</option>
+          <option value="greenhouse">Greenhouse</option>
+          <option value="freehire">FreeHire</option>
+        </select>
+      </div>
+
+      <div class="filter-select-wrapper">
+        <label for="locationSelect">Location:</label>
+        <select id="locationSelect" class="filter-select">
+          <option value="all">All Locations</option>
+          <option value="bengaluru">📍 Bengaluru / Karnataka</option>
+          <option value="remote">🌐 Remote (India/Global)</option>
+          <option value="hyderabad">Hyderabad</option>
+          <option value="pune">Pune</option>
+          <option value="chennai">Chennai</option>
+          <option value="mumbai">Mumbai</option>
+          <option value="delhi">Delhi NCR</option>
+        </select>
+      </div>
+
+      <div class="filter-select-wrapper">
+        <label for="workModeSelect">Work Mode:</label>
+        <select id="workModeSelect" class="filter-select">
+          <option value="all">All Modes</option>
+          <option value="remote">Remote</option>
+          <option value="hybrid">Hybrid</option>
+          <option value="onsite">On-site</option>
+        </select>
+      </div>
+
+      <div class="filter-select-wrapper">
+        <label for="verificationSelect">Freshness:</label>
+        <select id="verificationSelect" class="filter-select">
+          <option value="all">All Statuses</option>
+          <option value="verified_active">Verified Active</option>
+          <option value="blocked">Protected / Manual</option>
+          <option value="unverified">Unverified</option>
+          <option value="expired">Expired / Closed</option>
+        </select>
       </div>
     </section>
 
@@ -286,6 +342,63 @@
             </div>
           </div>
         </aside>
+      </div>
+    </div>
+  </div>
+
+  <!-- Communication & Calendar Hub Modal -->
+  <div class="modal hidden" id="commsModal">
+    <div class="modal-content comms-modal-content">
+      <div class="modal-header">
+        <div class="comms-header-title">
+          <div class="badge badge-primary">📬 Communication & Calendar Hub</div>
+          <h2>Recruiter Emails, Interviews & Follow-Up Intelligence</h2>
+        </div>
+        <div class="comms-header-actions">
+          <button class="btn btn-primary btn-sm" id="syncEmailsBtn">🔄 Sync Inbox</button>
+          <button class="btn btn-outline btn-sm" id="oauthSettingsBtn">⚙️ Google OAuth</button>
+          <button class="close-btn" id="closeCommsBtn">&times;</button>
+        </div>
+      </div>
+      <div class="modal-body comms-modal-body" id="commsModalBody">
+        <!-- Injected dynamically via app.js -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Career Intelligence & Growth Modal -->
+  <div class="modal hidden" id="careerIntelModal">
+    <div class="modal-content comms-modal-content">
+      <div class="modal-header">
+        <div class="comms-header-title">
+          <div class="badge badge-primary">📈 Career Intelligence & Growth</div>
+          <h2>Skills, Stories, Mock Interviews, Funnel Analytics & Offers</h2>
+        </div>
+        <div class="comms-header-actions">
+          <button class="close-btn" id="closeCareerIntelBtn">&times;</button>
+        </div>
+      </div>
+      <div class="modal-body comms-modal-body" id="careerIntelModalBody">
+        <!-- Injected dynamically via app.js -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Automation Engine & Backup Control Center Modal -->
+  <div class="modal hidden" id="automationBackupModal">
+    <div class="modal-content comms-modal-content">
+      <div class="modal-header">
+        <div class="comms-header-title">
+          <div class="badge badge-primary">⚙️ Automation & Backup Control Center</div>
+          <h2>Unified Background Engine, Task Health & Local Data Protection</h2>
+        </div>
+        <div class="comms-header-actions">
+          <button class="btn btn-outline btn-sm" id="refreshAutoStatusBtn">🔄 Refresh Status</button>
+          <button class="close-btn" id="closeAutomationBackupBtn">&times;</button>
+        </div>
+      </div>
+      <div class="modal-body comms-modal-body" id="automationBackupModalBody">
+        <!-- Injected dynamically via app.js -->
       </div>
     </div>
   </div>

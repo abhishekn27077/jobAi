@@ -1,20 +1,86 @@
 [
   {
-    "name": "SmartRecruiters Direct Feed",
+    "name": "Gloify",
     "portal": "smartrecruiters",
     "companyToken": "Gloify",
+    "location": "Bengaluru, India",
     "enabled": true
   },
   {
     "name": "Taurus Hard Soft Solutions",
     "portal": "smartrecruiters",
     "companyToken": "TaurusHardSoftSolutionsPvtLtd",
+    "location": "Bengaluru, India",
     "enabled": true
   },
   {
-    "name": "Cutshort Bengaluru Feed",
-    "portal": "cutshort",
-    "url": "https://cutshort.io/jobs/bengaluru-jobs",
+    "name": "Groww",
+    "portal": "greenhouse",
+    "companyToken": "groww",
+    "location": "Bengaluru, India",
+    "enabled": true
+  },
+  {
+    "name": "Zeta",
+    "portal": "lever",
+    "companyToken": "zeta",
+    "location": "Bengaluru / Mumbai, India",
+    "enabled": true
+  },
+  {
+    "name": "Palantir",
+    "portal": "lever",
+    "companyToken": "palantir",
+    "location": "Remote / Global",
+    "enabled": true
+  },
+  {
+    "name": "Sentry",
+    "portal": "ashby",
+    "companyToken": "sentry",
+    "location": "Remote / Global",
+    "enabled": true
+  },
+  {
+    "name": "Linear",
+    "portal": "ashby",
+    "companyToken": "linear",
+    "location": "Remote / Global",
+    "enabled": true
+  },
+  {
+    "name": "Replit",
+    "portal": "ashby",
+    "companyToken": "replit",
+    "location": "Remote / Global",
+    "enabled": true
+  },
+  {
+    "name": "Supabase",
+    "portal": "ashby",
+    "companyToken": "supabase",
+    "location": "Remote / Global",
+    "enabled": true
+  },
+  {
+    "name": "Cursor",
+    "portal": "ashby",
+    "companyToken": "cursor",
+    "location": "Remote / Global",
+    "enabled": true
+  },
+  {
+    "name": "Ramp",
+    "portal": "ashby",
+    "companyToken": "ramp",
+    "location": "Remote / Global",
+    "enabled": true
+  },
+  {
+    "name": "Cohere",
+    "portal": "ashby",
+    "companyToken": "cohere",
+    "location": "Remote / Global",
     "enabled": true
   }
 ]

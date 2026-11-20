@@ -6,14 +6,22 @@
 credentials.json
 token.json
 oauth_tokens/
+.oauth_tokens/
+data/.oauth_tokens/
+data/*token*.json
 
 # Local databases & storage
 data/*.db
+data/*.db-*
 data/*.sqlite
 data/*.sqlite3
 data/*.db-journal
 data/*.db-wal
+data/*.db-shm
 data/*.local.json
+data/backups/
+data/career_vault_export.json
+data/*.export.json
 data/candidate_profile.local.json
 
 # Generated applications & resumes

@@ -67,6 +67,10 @@ export function calculateAtsScore(jdAnalysis, resumeData, candidateProfile = nul
   let overallRecommendation = 'READY_TO_APPLY';
   let alert = null;
 
+  const candDegree = candidateProfile?.status?.currentDegree || candidateProfile?.education?.[0]?.degree || 'MCA';
+  const roleTitle = jdAnalysis?.title || 'the target role';
+  const reqExpText = jdAnalysis?.experience?.rawText || (jdAnalysis?.experience?.min ? `${jdAnalysis.experience.min} years` : '1-2 years');
+
   if (eligibilityAssessment.status === 'MANDATORY_NOT_MET') {
     // Cap overall score to prevent misleading user on ineligible positions
     overallScore = Math.min(45, Math.round(resumeCompatibilityScore * 0.45));
@@ -82,21 +86,21 @@ export function calculateAtsScore(jdAnalysis, resumeData, candidateProfile = nul
     alert = {
       type: 'warning',
       title: 'Potential Stretch Opportunity',
-      message: `Job requires ~2 years experience. As an MCA 2026 graduate with advanced internship and full-stack projects, you can apply but should address the experience gap in your cover letter.`
+      message: `Job specifies ${reqExpText} experience for "${roleTitle}". As a ${candDegree} graduate with verified full-stack project and internship evidence, this is a viable stretch application; address the experience delta in your cover letter.`
     };
   } else if (eligibilityAssessment.status === 'ELIGIBLE') {
     overallRecommendation = resumeCompatibilityScore >= 75 ? 'HIGH_MATCH' : 'MODERATE_MATCH';
     alert = {
       type: 'success',
-      title: 'Fully Eligible Fresher Role',
-      message: 'Your candidate profile meets all mandatory experience and qualification criteria.'
+      title: 'Fully Eligible Role',
+      message: `Your verified candidate profile (${candDegree}) satisfies the mandatory experience and education requirements for "${roleTitle}".`
     };
   } else {
     overallRecommendation = 'REVIEW_REQUIRED';
     alert = {
       type: 'info',
-      title: 'Insufficient JD Criteria',
-      message: 'The job posting does not explicitly specify years of experience.'
+      title: 'Insufficient Information in JD',
+      message: `The job description for "${roleTitle}" does not explicitly specify mandatory experience or degree criteria. Recruiter screening may have undisclosed requirements.`
     };
   }
 
@@ -141,6 +145,13 @@ export function calculateAtsScore(jdAnalysis, resumeData, candidateProfile = nul
       missingPreferred: reqCoverage.missingPreferred,
       presentInProfileButOmitted: reqCoverage.presentInProfileButOmitted,
       unverifiedInProfile: reqCoverage.unverifiedInProfile
+    },
+    requirementBreakdown: {
+      matchedRequirements: reqCoverage.matchedMandatory,
+      preferredRequirements: reqCoverage.matchedPreferred,
+      missingRequirements: reqCoverage.missingMandatory,
+      uncertainRequirements: eligibilityAssessment.uncertainRequirements || [],
+      unverifiedClaims: reqCoverage.unverifiedInProfile
     },
     suggestions
   };
@@ -315,15 +326,19 @@ function evaluateExperienceEligibility(jd) {
 export function evaluateJobEligibility(jd, candidateProfile, reqCoverage) {
   const exp = jd.experience || { min: 0, max: 1, isFresherEligible: true, rawText: '' };
   const unmet = [];
+  const uncertain = [];
   let status = 'ELIGIBLE';
   let label = 'Eligible';
   let badgeClass = 'eligible';
+
+  const candDegree = candidateProfile?.status?.currentDegree || candidateProfile?.education?.[0]?.degree || 'MCA';
+  const candLevel = candidateProfile?.status?.targetLevel || 'Fresher / Entry Level (MCA 2026, 0–1 years)';
 
   // Check 1: Seniority & Experience
   const isSeniorTitle = /senior|lead|architect|staff|principal|manager|head\s+of/i.test(jd.title || '');
   
   if (!exp.isFresherEligible && exp.min > 2 || isSeniorTitle || (exp.min && exp.min >= 3)) {
-    unmet.push(`Requires ${exp.min || 3}+ years commercial experience (${jd.title || 'Role'}). Candidate profile is Fresher / Entry Level (MCA 2026, 0–1 years).`);
+    unmet.push(`Requires ${exp.min || 3}+ years commercial experience (${jd.title || 'Role'}). Candidate profile is ${candLevel}.`);
     status = 'MANDATORY_NOT_MET';
     label = 'Mandatory requirement not met';
     badgeClass = 'not-met';
@@ -331,11 +346,12 @@ export function evaluateJobEligibility(jd, candidateProfile, reqCoverage) {
     status = 'POTENTIAL_STRETCH';
     label = 'Potential stretch';
     badgeClass = 'stretch';
-    unmet.push(`Requires 2 years commercial experience. Candidate is Fresher/MCA 2026 with production internship background.`);
+    unmet.push(`Requires ~${exp.min || 2} years commercial experience for ${jd.title || 'Role'}. Candidate is ${candLevel} (${candDegree}) with verified full-stack projects.`);
   } else if (!exp.rawText || exp.rawText === 'Not specified' || exp.min === undefined) {
     status = 'INSUFFICIENT_INFO';
     label = 'Insufficient information';
     badgeClass = 'info';
+    uncertain.push('Experience requirements are not explicitly enumerated in the job description.');
   } else {
     status = 'ELIGIBLE';
     label = 'Eligible';
@@ -345,7 +361,17 @@ export function evaluateJobEligibility(jd, candidateProfile, reqCoverage) {
   // Check 2: Degree eligibility
   const edu = jd.education || { isEligibleForMCA: true };
   if (edu.isEligibleForMCA === false) {
-    unmet.push(`Job explicitly requests non-CS degree: ${(edu.degrees || []).join(', ')}.`);
+    unmet.push(`Job explicitly requests non-CS degree: ${(edu.degrees || []).join(', ')}. Candidate holds ${candDegree}.`);
+    status = 'MANDATORY_NOT_MET';
+    label = 'Mandatory requirement not met';
+    badgeClass = 'not-met';
+  } else if (!edu.degrees || edu.degrees.length === 0) {
+    uncertain.push('Specific educational degree requirements not detailed in job description.');
+  }
+
+  // Check 3: Missing critical mandatory skills
+  if (reqCoverage && reqCoverage.missingMandatory && reqCoverage.missingMandatory.length > 0 && reqCoverage.mandatoryCoverage.score === 0) {
+    unmet.push(`Zero mandatory skills matched: missing all required skills (${reqCoverage.missingMandatory.join(', ')}).`);
     status = 'MANDATORY_NOT_MET';
     label = 'Mandatory requirement not met';
     badgeClass = 'not-met';
@@ -356,6 +382,7 @@ export function evaluateJobEligibility(jd, candidateProfile, reqCoverage) {
     label,
     badgeClass,
     unmetMandatoryRequirements: unmet,
+    uncertainRequirements: uncertain,
     experienceMin: exp.min,
     experienceMax: exp.max,
     isFresherEligible: exp.isFresherEligible,

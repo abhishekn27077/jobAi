@@ -11,8 +11,12 @@ const RESUMES_DIR = path.join(OUTPUT_DIR, 'resumes');
 const LETTERS_DIR = path.join(OUTPUT_DIR, 'cover_letters');
 
 export function auditDocumentTruthfulness(content, profile) {
-  const text = typeof content === 'string' ? content : JSON.stringify(content);
+  const text = typeof content === 'string' ? content : (content ? JSON.stringify(content) : '');
   const flags = [];
+
+  if (!text) {
+    return { passed: true, hasCritical: false, flags: [], warnings: [], claimAudits: [] };
+  }
 
   // 1. Unverified Production-grade / Production-ready claims
   const prodMatch = text.match(/\b(production-grade|production-ready|enterprise-grade)\b/i);
@@ -88,6 +92,128 @@ export function auditDocumentTruthfulness(content, profile) {
     });
   }
 
+  // 7. Claim-level Evidence Mapping
+  const claimAudits = [];
+  let parsedContent = null;
+  if (typeof content === 'object' && content !== null) {
+    parsedContent = content;
+  } else if (typeof content === 'string') {
+    try {
+      parsedContent = JSON.parse(content);
+    } catch {
+      // Markdown string, parsedContent remains null
+    }
+  }
+
+  if (parsedContent && profile) {
+    // Audit Projects
+    if (Array.isArray(parsedContent.projects)) {
+      for (const proj of parsedContent.projects) {
+        const pName = proj.name || '';
+        const match = (profile.projects || []).find(mp => {
+          const mpLower = mp.name.toLowerCase();
+          const pLower = pName.toLowerCase();
+          return mpLower === pLower ||
+                 mpLower.includes(pLower) ||
+                 pLower.includes(mpLower) ||
+                 mpLower.split(/[\s–—-]+/)[0] === pLower.split(/[\s–—-]+/)[0];
+        });
+        if (match) {
+          claimAudits.push({
+            section: 'projects',
+            claim: pName,
+            isSupported: true,
+            evidence: `Master profile project "${match.name}" (Tech stack: ${(match.techStack || []).join(', ')})`
+          });
+        } else {
+          claimAudits.push({
+            section: 'projects',
+            claim: pName,
+            isSupported: false,
+            warning: `Project "${pName}" not found in verified master candidate profile.`
+          });
+          flags.push({
+            term: pName,
+            category: 'UNVERIFIED_PROJECT',
+            severity: 'CRITICAL',
+            reason: `Project "${pName}" is not supported by evidence in the candidate profile.`
+          });
+        }
+      }
+    }
+
+    // Audit Education
+    if (Array.isArray(parsedContent.education)) {
+      for (const edu of parsedContent.education) {
+        const deg = edu.degree || '';
+        const match = (profile.education || []).find(me => {
+          const meDeg = me.degree.toLowerCase();
+          const dDeg = deg.toLowerCase();
+          return meDeg === dDeg || meDeg.includes(dDeg) || dDeg.includes(meDeg);
+        });
+        if (match) {
+          claimAudits.push({
+            section: 'education',
+            claim: deg,
+            isSupported: true,
+            evidence: `${match.degree} from ${match.institution} (${match.period})`
+          });
+        } else {
+          claimAudits.push({
+            section: 'education',
+            claim: deg,
+            isSupported: false,
+            warning: `Degree "${deg}" is unverified against master profile.`
+          });
+          flags.push({
+            term: deg,
+            category: 'UNVERIFIED_DEGREE',
+            severity: 'CRITICAL',
+            reason: `Degree "${deg}" is not verified in master candidate profile.`
+          });
+        }
+      }
+    }
+
+    // Audit Experience / Internships
+    if (Array.isArray(parsedContent.experience)) {
+      const allExperiences = (profile.experience || []).concat(profile.internships || []).concat(profile.internship ? [profile.internship] : []);
+      for (const exp of parsedContent.experience) {
+        const role = exp.role || exp.title || '';
+        const org = exp.company || exp.organization || '';
+        const matchIntern = allExperiences.find(mi => {
+          const cName = (mi.company || mi.organization || '').toLowerCase();
+          const rName = (mi.role || mi.title || '').toLowerCase();
+          const targetOrg = org.toLowerCase();
+          const targetRole = role.toLowerCase();
+          return (cName && targetOrg && (cName.includes(targetOrg) || targetOrg.includes(cName))) ||
+                 (rName && targetRole && (rName.includes(targetRole) || targetRole.includes(rName)));
+        });
+        if (matchIntern) {
+          claimAudits.push({
+            section: 'experience',
+            claim: `${role} at ${org}`,
+            isSupported: true,
+            evidence: `Verified internship at ${matchIntern.company || matchIntern.organization} (${matchIntern.period})`
+          });
+        } else {
+          claimAudits.push({
+            section: 'experience',
+            claim: `${role} at ${org}`,
+            isSupported: false,
+            warning: `Experience at "${org}" is not verified in master profile.`
+          });
+          flags.push({
+            term: `${role} at ${org}`,
+            category: 'UNVERIFIED_EXPERIENCE',
+            severity: 'CRITICAL',
+            reason: `Experience claim "${role} at ${org}" not found in candidate profile.`
+          });
+        }
+      }
+    }
+  }
+
   const warnings = flags.map(f => `[${f.category}] ${f.reason}`);
   const hasCritical = flags.some(f => f.severity === 'CRITICAL');
 
@@ -95,7 +221,8 @@ export function auditDocumentTruthfulness(content, profile) {
     passed: !hasCritical && flags.length === 0,
     hasCritical,
     flags,
-    warnings
+    warnings,
+    claimAudits
   };
 }
 

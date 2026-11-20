@@ -23,6 +23,71 @@ function setupEventListeners() {
     applyFilters();
   });
 
+  // Advanced Discovery Filter Dropdowns
+  ['sourceSelect', 'locationSelect', 'workModeSelect', 'verificationSelect'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener('change', () => {
+        applyFilters();
+      });
+    }
+  });
+
+  // Scan History Telemetry Button
+  const histBtn = document.getElementById('scanHistoryBtn');
+  if (histBtn) {
+    histBtn.addEventListener('click', openScanHistoryModal);
+  }
+
+  // Applications Pipeline Button
+  const appsBtn = document.getElementById('viewApplicationsBtn');
+  if (appsBtn) {
+    appsBtn.addEventListener('click', openApplicationsModal);
+  }
+
+  // Portal Matrix Button
+  const portalsBtn = document.getElementById('portalMatrixBtn');
+  if (portalsBtn) {
+    portalsBtn.addEventListener('click', openPortalMatrixModal);
+  }
+
+  // Communications & Calendar Hub Button
+  const commsBtn = document.getElementById('commsHubBtn');
+  if (commsBtn) {
+    commsBtn.addEventListener('click', openCommsHubModal);
+  }
+
+  // Career Intelligence Button
+  const careerIntelBtn = document.getElementById('careerIntelBtn');
+  if (careerIntelBtn) {
+    careerIntelBtn.addEventListener('click', () => openCareerIntelligenceModal());
+  }
+
+  const closeCareerIntelBtn = document.getElementById('closeCareerIntelBtn');
+  if (closeCareerIntelBtn) {
+    closeCareerIntelBtn.addEventListener('click', () => {
+      document.getElementById('careerIntelModal').classList.add('hidden');
+    });
+  }
+
+  // Automation & Backup Button
+  const autoBackupBtn = document.getElementById('automationBackupBtn');
+  if (autoBackupBtn) {
+    autoBackupBtn.addEventListener('click', () => openAutomationBackupModal());
+  }
+
+  const closeAutoBackupBtn = document.getElementById('closeAutomationBackupBtn');
+  if (closeAutoBackupBtn) {
+    closeAutoBackupBtn.addEventListener('click', () => {
+      document.getElementById('automationBackupModal').classList.add('hidden');
+    });
+  }
+
+  const refreshAutoStatusBtn = document.getElementById('refreshAutoStatusBtn');
+  if (refreshAutoStatusBtn) {
+    refreshAutoStatusBtn.addEventListener('click', () => loadAndRenderAutomationModal());
+  }
+
   // Scan Button
   document.getElementById('scanBtn').addEventListener('click', async () => {
     const scanBtn = document.getElementById('scanBtn');
@@ -102,6 +167,66 @@ function setupEventListeners() {
     window.location.href = '/api/export/json';
   });
 
+  async function openScanHistoryModal() {
+    openModal('Job Discovery Telemetry & Scan History', '<div class="loading"><div class="spinner"></div><p>Loading scan telemetry...</p></div>');
+    try {
+      const resp = await fetch('/api/scan-history');
+      const data = await resp.json();
+      const list = data.history || [];
+
+      if (list.length === 0) {
+        document.getElementById('modalBody').innerHTML = `
+          <div style="text-align: center; padding: 30px; color: #94a3b8;">
+            <p>No recent scan history recorded yet.</p>
+            <p style="margin-top: 8px;">Click "⚡ Scan Jobs" to execute a discovery run.</p>
+          </div>
+        `;
+        return;
+      }
+
+      let rowsHtml = list.map(item => {
+        const timeStr = item.scanned_at ? item.scanned_at.replace('T', ' ') : 'N/A';
+        const statusBadge = item.status === 'success' 
+          ? '<span style="color: #4ade80; font-weight: 600;">✓ Success</span>' 
+          : `<span style="color: #f87171; font-weight: 600;" title="${escapeHtml(item.error_message || '')}">✗ Error</span>`;
+        return `
+          <tr style="border-bottom: 1px solid #334155; font-size: 13px;">
+            <td style="padding: 10px 8px; color: #cbd5e1;">${timeStr}</td>
+            <td style="padding: 10px 8px;"><span class="source-tag source-${escapeHtml(item.source)}">${escapeHtml(item.source)}</span></td>
+            <td style="padding: 10px 8px; color: #f1f5f9;"><strong>${escapeHtml(item.target_name || item.query || 'Global')}</strong></td>
+            <td style="padding: 10px 8px; text-align: right; color: #93c5fd;">${item.jobs_found}</td>
+            <td style="padding: 10px 8px; text-align: right; color: #4ade80;">+${item.new_jobs_added}</td>
+            <td style="padding: 10px 8px; text-align: right; color: #94a3b8;">${item.duration_ms}ms</td>
+            <td style="padding: 10px 8px;">${statusBadge}</td>
+          </tr>
+        `;
+      }).join('');
+
+      document.getElementById('modalBody').innerHTML = `
+        <div style="max-height: 500px; overflow-y: auto;">
+          <table style="width: 100%; border-collapse: collapse; text-align: left;">
+            <thead>
+              <tr style="border-bottom: 2px solid #475569; font-size: 12px; color: #94a3b8; text-transform: uppercase;">
+                <th style="padding: 8px;">Timestamp</th>
+                <th style="padding: 8px;">Source</th>
+                <th style="padding: 8px;">Target / Query</th>
+                <th style="padding: 8px; text-align: right;">Found</th>
+                <th style="padding: 8px; text-align: right;">New</th>
+                <th style="padding: 8px; text-align: right;">Latency</th>
+                <th style="padding: 8px;">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml}
+            </tbody>
+          </table>
+        </div>
+      `;
+    } catch (err) {
+      document.getElementById('modalBody').innerHTML = `<p class="text-danger">Failed to load scan history: ${err.message}</p>`;
+    }
+  }
+
   document.getElementById('closeModalBtn').addEventListener('click', () => {
     closeModal();
   });
@@ -149,16 +274,55 @@ async function loadJobs() {
 
 function applyFilters() {
   const searchTerm = (document.getElementById('searchInput').value || '').toLowerCase().trim();
+  const sourceFilter = document.getElementById('sourceSelect') ? document.getElementById('sourceSelect').value.toLowerCase() : 'all';
+  const locationFilter = document.getElementById('locationSelect') ? document.getElementById('locationSelect').value.toLowerCase() : 'all';
+  const workModeFilter = document.getElementById('workModeSelect') ? document.getElementById('workModeSelect').value.toLowerCase() : 'all';
+  const verifFilter = document.getElementById('verificationSelect') ? document.getElementById('verificationSelect').value.toLowerCase() : 'all';
+
   const grid = document.getElementById('jobGrid');
   grid.innerHTML = '';
 
   let filtered = allJobs.filter(job => {
+    // Tab filters
     if (currentFilter === 'RECOMMENDED' && job.recommendation !== 'RECOMMENDED') return false;
     if (currentFilter === 'CONSIDER' && job.recommendation !== 'CONSIDER') return false;
     if (currentFilter === 'saved' && job.status !== 'saved') return false;
     if (currentFilter === 'ready_to_apply' && job.status !== 'ready_to_apply') return false;
     if (currentFilter === 'applied' && job.status !== 'applied') return false;
 
+    // Source dropdown
+    if (sourceFilter !== 'all') {
+      const jSource = (job.source || 'direct').toLowerCase();
+      if (jSource !== sourceFilter) return false;
+    }
+
+    // Work Mode dropdown
+    if (workModeFilter !== 'all') {
+      const jWp = (job.work_mode || 'onsite').toLowerCase();
+      if (jWp !== workModeFilter) return false;
+    }
+
+    // Verification dropdown
+    if (verifFilter !== 'all') {
+      const jVerif = (job.verification_status || 'unverified').toLowerCase();
+      if (jVerif !== verifFilter) return false;
+    }
+
+    // Location dropdown
+    if (locationFilter !== 'all') {
+      const jLoc = (job.location || '').toLowerCase();
+      if (locationFilter === 'bengaluru') {
+        const isBlr = jLoc.includes('bengaluru') || jLoc.includes('bangalore') || jLoc.includes('karnataka');
+        if (!isBlr) return false;
+      } else if (locationFilter === 'remote') {
+        const isRem = jLoc.includes('remote') || (job.work_mode || '').toLowerCase() === 'remote';
+        if (!isRem) return false;
+      } else {
+        if (!jLoc.includes(locationFilter)) return false;
+      }
+    }
+
+    // Search term
     if (searchTerm) {
       const matchText = `${job.title} ${job.company} ${job.location} ${(job.skills_matched || []).join(' ')}`.toLowerCase();
       if (!matchText.includes(searchTerm)) return false;
@@ -172,7 +336,7 @@ function applyFilters() {
     grid.innerHTML = `
       <div style="text-align: center; padding: 50px; color: var(--text-muted); background: var(--surface); border-radius: 8px;">
         <h3>No jobs matching this filter</h3>
-        <p style="margin-top: 8px;">Click "⚡ Scan Jobs" to fetch the latest Indian tech job listings.</p>
+        <p style="margin-top: 8px;">Try adjusting your source, location, or work mode filters, or click "⚡ Scan Jobs" to discover new opportunities.</p>
       </div>
     `;
     return;
@@ -194,6 +358,11 @@ function createJobCard(job) {
   const matchedHtml = (job.skills_matched || []).map(s => `<span class="skill-tag skill-matched">${escapeHtml(s)}</span>`).join('');
   const missingHtml = (job.skills_missing || []).map(s => `<span class="skill-tag skill-missing">${escapeHtml(s)}</span>`).join('');
 
+  const sourceName = (job.source || 'direct').toLowerCase();
+  const workModeStr = (job.work_mode || 'onsite').toLowerCase();
+  const verifStatus = (job.verification_status || 'unverified').toLowerCase();
+  const verifText = verifStatus === 'verified_active' ? '✓ Verified' : (verifStatus === 'blocked' ? '🔒 Protected' : (verifStatus === 'expired' ? '✗ Expired' : '• Unverified'));
+
   card.innerHTML = `
     <div class="job-header">
       <div class="job-title-row">
@@ -202,6 +371,9 @@ function createJobCard(job) {
         </a>
         <div class="job-company">${escapeHtml(job.company)}</div>
         <div class="job-meta-chips">
+          <span class="source-tag source-${escapeHtml(sourceName)}">🏷 ${escapeHtml(job.source || 'direct')}</span>
+          <span class="workmode-chip workmode-${escapeHtml(workModeStr)}">${workModeStr === 'remote' ? '🌐 Remote' : (workModeStr === 'hybrid' ? '🏢 Hybrid' : '📍 On-site')}</span>
+          <span class="verif-chip verif-${escapeHtml(verifStatus)}">${verifText}</span>
           <span>📍 ${escapeHtml(job.location || 'India')}</span>
           ${job.salary ? `<span>💰 ${escapeHtml(job.salary)}</span>` : ''}
           ${job.experience_min !== null ? `<span>🎓 Exp: ${job.experience_min}${job.experience_max ? `-${job.experience_max}` : '+'} yrs</span>` : ''}
@@ -267,28 +439,351 @@ window.tailorDocuments = async function(jobId) {
 };
 
 window.assistApplication = async function(jobId) {
-  openModal('Launching Form Assistant...', '<div class="loading"><div class="spinner"></div><p>Opening visible Google Chrome session via Playwright...</p></div>');
+  openModal('Application Intelligence Workbench', '<div class="loading"><div class="spinner"></div><p>Compiling job application dossier, checking freshness, selecting resume, and grounding screening answers...</p></div>');
   try {
-    const resp = await fetch(`/api/job/${jobId}/assist`, { method: 'POST' });
+    const resp = await fetch(`/api/job/${jobId}/application`);
+    const data = await resp.json();
+    if (!data.success) throw new Error(data.error);
+
+    renderApplicationIntelligenceModal(data.dossier);
+  } catch (err) {
+    document.getElementById('modalBody').innerHTML = `<p class="text-danger">Failed to compile application dossier: ${err.message}</p>`;
+  }
+};
+
+function renderApplicationIntelligenceModal(d) {
+  const portalBadge = `<span class="source-tag source-${escapeHtml(d.portal.name.toLowerCase())}" style="font-size: 12px;">${escapeHtml(d.portal.name)}</span>`;
+  const supportTag = d.portal.supportLevel === 'supported' 
+    ? '<span style="background: rgba(34, 197, 94, 0.15); color: #4ade80; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">✓ Supported</span>' 
+    : '<span style="background: rgba(234, 179, 8, 0.15); color: #facc15; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">⚡ Guided Assist</span>';
+
+  // Checklist HTML
+  const checklistHtml = (d.checklist || []).map(item => {
+    const icon = item.completed ? '✅' : (item.required ? '🔒' : '⏳');
+    return `
+      <div style="display: flex; align-items: center; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 13px;">
+        <span>${icon} ${escapeHtml(item.label)}</span>
+        <span style="color: ${item.completed ? '#4ade80' : '#f59e0b'}; font-size: 11px; font-weight: 600;">${item.completed ? 'READY' : (item.required ? 'ACTION REQUIRED' : 'PENDING')}</span>
+      </div>
+    `;
+  }).join('');
+
+  // Screening Questions HTML
+  const screeningKeys = Object.keys(d.screeningAnswers || {});
+  const screeningHtml = screeningKeys.map(k => {
+    const q = d.screeningAnswers[k];
+    const confClass = q.confidence === 'high' ? 'color: #4ade80;' : (q.confidence === 'medium' ? 'color: #facc15;' : 'color: #f87171;');
+    return `
+      <div style="background: rgba(15,23,42,0.6); padding: 12px; border-radius: 6px; margin-bottom: 12px; border: 1px solid #334155;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+          <strong style="color: #93c5fd; font-size: 13px;">${escapeHtml(q.question.replace(/_/g, ' ').toUpperCase())}</strong>
+          <span style="${confClass} font-size: 11px; font-weight: 600;">[Confidence: ${escapeHtml(q.confidence.toUpperCase())}]</span>
+        </div>
+        <p style="font-size: 11px; color: #94a3b8; margin-bottom: 6px;">Evidence: <em>${escapeHtml(q.evidence || 'Verified profile')}</em></p>
+        <textarea id="screening_${escapeHtml(k)}" rows="2" style="width: 100%; background: #0f172a; border: 1px solid #475569; color: #f1f5f9; padding: 8px; border-radius: 4px; font-size: 12px; line-height: 1.4; resize: vertical;">${escapeHtml(q.answer || '')}</textarea>
+      </div>
+    `;
+  }).join('');
+
+  document.getElementById('modalBody').innerHTML = `
+    <div style="max-height: 600px; overflow-y: auto; padding-right: 6px;">
+      <!-- Job & Portal Meta Header -->
+      <div style="background: #1e293b; padding: 16px; border-radius: 8px; margin-bottom: 16px; border-left: 4px solid #3b82f6;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
+          <div>
+            <h3 style="color: #f8fafc; font-size: 16px; margin-bottom: 2px;">${escapeHtml(d.job.title)}</h3>
+            <p style="color: #94a3b8; font-size: 13px;">${escapeHtml(d.job.company)} • 📍 ${escapeHtml(d.job.location)}</p>
+          </div>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            ${portalBadge}
+            ${supportTag}
+          </div>
+        </div>
+        <div style="display: flex; gap: 12px; align-items: center; margin-top: 10px; font-size: 12px;">
+          <a href="${escapeHtml(d.job.url)}" target="_blank" rel="noopener noreferrer" style="color: #38bdf8; text-decoration: underline;">🔗 View Original Application URL</a>
+          <span style="color: #64748b;">|</span>
+          <span style="color: #4ade80;">ATS Compatibility: <strong>${d.evaluation.score}/100</strong></span>
+          <span style="color: #64748b;">|</span>
+          <span style="color: #a78bfa;">Fresher Eligible: <strong>${d.evaluation.fresherEligible ? 'YES' : 'NO'}</strong></span>
+        </div>
+      </div>
+
+      <!-- Recommended Resume & Cover Letter -->
+      <div style="background: #0f172a; padding: 14px; border-radius: 8px; margin-bottom: 16px; border: 1px solid #334155;">
+        <h4 style="color: #38bdf8; margin-bottom: 8px; font-size: 14px;">📄 Recommended Verified Resume Version</h4>
+        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 13px;">
+          <div>
+            <span style="color: #f1f5f9; font-weight: 600;">Resume Version: v${d.resumeVersion.versionNumber || 1}</span>
+            <span style="color: #94a3b8; margin-left: 8px;">(ATS Match: ${d.resumeVersion.atsScore}/100)</span>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <a href="${d.resumeVersion.pdfUrl}" target="_blank" class="btn btn-outline btn-sm">👁 Preview PDF</a>
+            <button class="btn btn-outline btn-sm" onclick="openResumeStudio(${d.jobId})">✏ Edit in Studio</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Application Preparation Checklist -->
+      <div style="background: #1e293b; padding: 14px; border-radius: 8px; margin-bottom: 16px; border: 1px solid #334155;">
+        <h4 style="color: #f8fafc; margin-bottom: 8px; font-size: 14px;">📋 Pre-Application Readiness Checklist</h4>
+        ${checklistHtml}
+      </div>
+
+      <!-- Screening Questions -->
+      <div style="margin-bottom: 16px;">
+        <h4 style="color: #f8fafc; margin-bottom: 8px; font-size: 14px;">🧠 Verified Screening Intelligence (Editable Answers)</h4>
+        <p style="font-size: 12px; color: #94a3b8; margin-bottom: 12px;">Answers are strictly generated using verified candidate master profile evidence. Review or edit any response prior to browser auto-fill:</p>
+        ${screeningHtml}
+      </div>
+
+      <!-- Human-in-the-Loop Safety Banner -->
+      <div style="background: rgba(30, 58, 138, 0.4); border: 1px solid #2563eb; padding: 14px; border-radius: 8px; margin-bottom: 20px;">
+        <div style="display: flex; gap: 10px; align-items: center;">
+          <span style="font-size: 24px;">🔒</span>
+          <div style="font-size: 12px; color: #bfdbfe; line-height: 1.5;">
+            <strong>Mandatory Human Approval Rule:</strong><br>
+            CareerOS opens a visible Google Chrome browser and pre-fills only the approved fields above. CareerOS <strong>NEVER clicks Submit</strong> and never accepts legal agreements on your behalf. You review the open browser and click Submit manually on the employer portal.
+          </div>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div style="display: flex; justify-content: space-between; gap: 12px; align-items: center; border-top: 1px solid #334155; padding-top: 16px;">
+        <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+        <div style="display: flex; gap: 10px;">
+          <button class="btn btn-outline" onclick="promptConfirmSubmission(${d.jobId}, '${escapeHtml(d.job.title)}', '${escapeHtml(d.job.company)}')">✅ Confirm I Submitted</button>
+          <button class="btn btn-primary" onclick="executeApproveAndFill(${d.jobId}, '${escapeHtml(d.resumeVersion.pdfPath || '')}')" style="background: linear-gradient(135deg, #2563eb, #10b981); border: none;">
+            🚀 Approve & Fill Application Form
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+window.executeApproveAndFill = async function(jobId, resumePdfPath) {
+  const inputs = document.querySelectorAll('[id^="screening_"]');
+  const gathered = {};
+  inputs.forEach(el => {
+    const key = el.id.replace('screening_', '');
+    gathered[key] = { answer: el.value.trim() };
+  });
+
+  openModal('Launching Form Assistant...', '<div class="loading"><div class="spinner"></div><p>Launching visible Chrome browser with verified candidate data...</p></div>');
+  try {
+    const resp = await fetch(`/api/job/${jobId}/assist`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userConfirmedApproval: true,
+        resumePdfPath,
+        screeningAnswers: gathered
+      })
+    });
     const data = await resp.json();
     if (!data.success) throw new Error(data.error);
 
     document.getElementById('modalBody').innerHTML = `
-      <div style="text-align: center; padding: 20px;">
-        <div style="font-size: 40px; margin-bottom: 12px;">🚀</div>
-        <h3>Visible Chrome Session Active</h3>
-        <p style="color: #94a3b8; margin: 12px 0 20px 0; line-height: 1.5;">${escapeHtml(data.message)}</p>
-        <div style="background: #1e3a8a; color: white; padding: 12px; border-radius: 8px; font-size: 13px; text-align: left;">
-          <strong>Human-in-the-Loop Safety Rule:</strong><br>
-          CareerOS pre-fills your verified candidate data and attaches your tailored resume PDF. Review all fields in your open Chrome browser window and click <strong>Submit</strong> manually.
+      <div style="text-align: center; padding: 24px;">
+        <div style="font-size: 44px; margin-bottom: 12px;">🚀</div>
+        <h3 style="color: #4ade80;">Form Assistant Active in Browser</h3>
+        <p style="color: #cbd5e1; margin: 12px 0 20px 0; font-size: 14px; line-height: 1.6;">
+          ${escapeHtml(data.message)}
+        </p>
+        <div style="background: #0f172a; padding: 14px; border-radius: 8px; text-align: left; font-size: 13px; color: #94a3b8; border: 1px solid #334155; margin-bottom: 20px;">
+          <strong style="color: #f1f5f9;">Next Steps:</strong>
+          <ol style="margin-top: 6px; padding-left: 20px; line-height: 1.6;">
+            <li>Switch to your open Google Chrome browser window.</li>
+            <li>Review all pre-filled fields and attachments.</li>
+            <li>Complete any CAPTCHA or mandatory checkboxes.</li>
+            <li>Click <strong>Submit Application</strong> manually on the employer portal.</li>
+            <li>Return here and click <strong>"Confirm I Submitted"</strong> to record your confirmation.</li>
+          </ol>
+        </div>
+        <div style="display: flex; justify-content: center; gap: 12px;">
+          <button class="btn btn-outline" onclick="closeModal()">Dismiss</button>
+          <button class="btn btn-primary" onclick="promptConfirmSubmission(${jobId})">✅ Confirm I Submitted</button>
         </div>
       </div>
     `;
     await loadJobs();
   } catch (err) {
-    document.getElementById('modalBody').innerHTML = `<p class="text-danger">Failed to launch form assistant: ${err.message}</p>`;
+    document.getElementById('modalBody').innerHTML = `<p class="text-danger">Failed to launch assistant: ${err.message}</p>`;
   }
 };
+
+window.promptConfirmSubmission = function(jobId, title = 'Role', company = 'Company') {
+  document.getElementById('modalTitle').textContent = 'Confirm Application Submission';
+  document.getElementById('modalBody').innerHTML = `
+    <div style="padding: 10px;">
+      <p style="color: #cbd5e1; font-size: 13px; line-height: 1.5; margin-bottom: 16px;">
+        Confirming an application records it into your verified pipeline history and moves its status to <strong>Submitted</strong>.
+      </p>
+      <div style="margin-bottom: 14px;">
+        <label style="display: block; font-size: 12px; color: #94a3b8; margin-bottom: 4px;">Confirmation / Application ID (optional):</label>
+        <input type="text" id="confirmIdInput" placeholder="e.g. APP-94812 or GH-1823" style="width: 100%; background: #0f172a; border: 1px solid #475569; color: white; padding: 8px; border-radius: 6px; font-size: 13px;" />
+      </div>
+      <div style="margin-bottom: 20px;">
+        <label style="display: block; font-size: 12px; color: #94a3b8; margin-bottom: 4px;">Submission Notes / Portal used:</label>
+        <textarea id="confirmNotesInput" placeholder="Submitted via direct Greenhouse board after reviewing tailored resume." rows="2" style="width: 100%; background: #0f172a; border: 1px solid #475569; color: white; padding: 8px; border-radius: 6px; font-size: 13px;"></textarea>
+      </div>
+      <div style="display: flex; justify-content: flex-end; gap: 10px;">
+        <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="executeConfirmSubmission(${jobId})" style="background: #10b981; border: none;">
+          ✓ Confirm Submission
+        </button>
+      </div>
+    </div>
+  `;
+};
+
+window.executeConfirmSubmission = async function(jobId) {
+  const confId = document.getElementById('confirmIdInput')?.value.trim() || null;
+  const notes = document.getElementById('confirmNotesInput')?.value.trim() || 'Submitted manually by user';
+
+  try {
+    const resp = await fetch(`/api/job/${jobId}/application/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        status: 'submitted',
+        userConfirmed: true,
+        confirmationNumber: confId,
+        notes
+      })
+    });
+    const result = await resp.json();
+    if (!result.success) throw new Error(result.error);
+
+    document.getElementById('modalBody').innerHTML = `
+      <div style="text-align: center; padding: 24px;">
+        <div style="font-size: 40px; margin-bottom: 12px;">🎉</div>
+        <h3 style="color: #4ade80;">Application Marked as Submitted!</h3>
+        <p style="color: #94a3b8; margin: 12px 0 20px 0; font-size: 13px;">
+          Job #${jobId} status is now recorded as <strong>Submitted</strong> in your Career Vault.<br>
+          ${confId ? `Confirmation Number: <strong>${escapeHtml(confId)}</strong>` : ''}
+        </p>
+        <button class="btn btn-primary" onclick="closeModal()">Done</button>
+      </div>
+    `;
+    await loadStats();
+    await loadJobs();
+  } catch (err) {
+    alert('Failed to record submission: ' + err.message);
+  }
+};
+
+async function openApplicationsModal() {
+  openModal('Active Applications Pipeline', '<div class="loading"><div class="spinner"></div><p>Loading application tracker...</p></div>');
+  try {
+    const resp = await fetch('/api/applications');
+    const data = await resp.json();
+    const apps = data.applications || [];
+
+    if (apps.length === 0) {
+      document.getElementById('modalBody').innerHTML = `
+        <div style="text-align: center; padding: 30px; color: #94a3b8;">
+          <p>No applications prepared yet.</p>
+          <p style="margin-top: 8px;">Click "🚀 Assist Apply" on any recommended role to prepare an application dossier.</p>
+        </div>
+      `;
+      return;
+    }
+
+    const rowsHtml = apps.map(a => {
+      const statusColors = {
+        preparing: '#94a3b8',
+        ready_for_review: '#facc15',
+        submitted: '#4ade80',
+        interview: '#38bdf8',
+        offer: '#ec4899',
+        rejected: '#f87171'
+      };
+      const color = statusColors[a.status] || '#cbd5e1';
+
+      return `
+        <tr style="border-bottom: 1px solid #334155; font-size: 13px;">
+          <td style="padding: 10px 8px;">
+            <strong style="color: #f1f5f9;">${escapeHtml(a.job_title)}</strong><br>
+            <span style="color: #94a3b8; font-size: 11px;">${escapeHtml(a.job_company)}</span>
+          </td>
+          <td style="padding: 10px 8px;"><span class="source-tag source-${escapeHtml((a.portal_type || 'generic').toLowerCase())}">${escapeHtml(a.portal_type || 'Direct')}</span></td>
+          <td style="padding: 10px 8px; color: #93c5fd; font-size: 12px;">${escapeHtml(a.resume_version || 'v1')}</td>
+          <td style="padding: 10px 8px;"><span style="color: ${color}; font-weight: 700; text-transform: uppercase; font-size: 11px;">${escapeHtml(a.status)}</span></td>
+          <td style="padding: 10px 8px; color: #94a3b8; font-size: 12px;">${a.applied_date ? a.applied_date.split('T')[0] : 'In Prep'}</td>
+          <td style="padding: 10px 8px;">
+            <button class="btn btn-outline btn-sm" onclick="assistApplication(${a.job_id})">Open Dossier</button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    document.getElementById('modalBody').innerHTML = `
+      <div style="max-height: 500px; overflow-y: auto;">
+        <table style="width: 100%; border-collapse: collapse; text-align: left;">
+          <thead>
+            <tr style="border-bottom: 2px solid #475569; font-size: 12px; color: #94a3b8; text-transform: uppercase;">
+              <th style="padding: 8px;">Role & Company</th>
+              <th style="padding: 8px;">Portal</th>
+              <th style="padding: 8px;">Resume</th>
+              <th style="padding: 8px;">Status</th>
+              <th style="padding: 8px;">Date</th>
+              <th style="padding: 8px;">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml}
+          </tbody>
+        </table>
+      </div>
+    `;
+  } catch (err) {
+    document.getElementById('modalBody').innerHTML = `<p class="text-danger">Failed to load applications: ${err.message}</p>`;
+  }
+}
+
+async function openPortalMatrixModal() {
+  openModal('ATS Portal Compatibility Matrix', '<div class="loading"><div class="spinner"></div><p>Loading compatibility matrix...</p></div>');
+  try {
+    const resp = await fetch('/api/portals');
+    const data = await resp.json();
+    const portals = data.portals || [];
+
+    const rowsHtml = portals.map(p => {
+      const isSupp = p.supportLevel === 'supported';
+      const badge = isSupp
+        ? '<span style="background: rgba(34, 197, 94, 0.15); color: #4ade80; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;">✓ SUPPORTED</span>'
+        : '<span style="background: rgba(234, 179, 8, 0.15); color: #facc15; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;">⚡ GUIDED ASSIST</span>';
+
+      return `
+        <div style="background: #1e293b; padding: 14px; border-radius: 8px; margin-bottom: 12px; border: 1px solid #334155;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <strong style="color: #f8fafc; font-size: 14px;">${escapeHtml(p.portal)}</strong>
+            ${badge}
+          </div>
+          <p style="font-size: 12px; color: #cbd5e1; margin-bottom: 8px;">${escapeHtml(p.description)}</p>
+          <div style="font-size: 12px; color: #94a3b8; margin-bottom: 4px;">
+            <span style="color: #4ade80; font-weight: 600;">Automated Pre-Fill:</span> ${escapeHtml(p.automatedActions.join(' • ')}
+          </div>
+          <div style="font-size: 12px; color: #94a3b8;">
+            <span style="color: #f59e0b; font-weight: 600;">Manual User Step:</span> ${escapeHtml(p.manualActionsRequired.join(' • ')}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    document.getElementById('modalBody').innerHTML = `
+      <div style="max-height: 520px; overflow-y: auto;">
+        <p style="font-size: 13px; color: #94a3b8; margin-bottom: 16px;">
+          CareerOS provides dedicated, verified portal adapters for primary tech ATS systems. No universal or brittle claim is made.
+        </p>
+        ${rowsHtml}
+      </div>
+    `;
+  } catch (err) {
+    document.getElementById('modalBody').innerHTML = `<p class="text-danger">Failed to load portal matrix: ${err.message}</p>`;
+  }
+}
 
 window.openInterviewPrep = async function(jobId) {
   openModal('Generating Interview Preparation Dossier...', '<div class="loading"><div class="spinner"></div><p>Preparing technical and STAR behavioral questions...</p></div>');
@@ -1214,4 +1709,1554 @@ window.deleteVersion = async function(versionId) {
     alert('Delete error: ' + err.message);
   }
 };
+
+/* ========================================================
+   PHASE 4: COMMUNICATIONS & CALENDAR HUB CONTROLLER
+   ======================================================== */
+let commsHubState = {
+  activeTab: 'emails',
+  summary: null,
+  recentEmails: [],
+  pendingDrafts: [],
+  upcomingInterviews: [],
+  pendingReminders: []
+};
+
+// Wire modal close and action buttons
+document.addEventListener('DOMContentLoaded', () => {
+  const closeCommsBtn = document.getElementById('closeCommsBtn');
+  if (closeCommsBtn) {
+    closeCommsBtn.addEventListener('click', () => {
+      document.getElementById('commsModal').classList.add('hidden');
+    });
+  }
+
+  const syncBtn = document.getElementById('syncEmailsBtn');
+  if (syncBtn) {
+    syncBtn.addEventListener('click', syncEmails);
+  }
+
+  const oauthBtn = document.getElementById('oauthSettingsBtn');
+  if (oauthBtn) {
+    oauthBtn.addEventListener('click', openOAuthModal);
+  }
+});
+
+window.openCommsHubModal = async function(activeTab = 'emails') {
+  commsHubState.activeTab = activeTab;
+  const modal = document.getElementById('commsModal');
+  modal.classList.remove('hidden');
+
+  const bodyEl = document.getElementById('commsModalBody');
+  bodyEl.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading communication hub & calendar data...</p></div>';
+
+  try {
+    const resp = await fetch('/api/communications/summary');
+    const data = await resp.json();
+    if (!data.success) throw new Error(data.error);
+
+    commsHubState.summary = data.summary;
+    commsHubState.recentEmails = data.recentEmails || [];
+    commsHubState.pendingDrafts = data.pendingDrafts || [];
+    commsHubState.upcomingInterviews = data.upcomingInterviews || [];
+    commsHubState.pendingReminders = data.pendingReminders || [];
+
+    renderCommsHub();
+  } catch (err) {
+    bodyEl.innerHTML = `<p class="text-danger">Failed to load communications hub: ${err.message}</p>`;
+  }
+};
+
+function renderCommsHub() {
+  const bodyEl = document.getElementById('commsModalBody');
+  const s = commsHubState.summary || {};
+  const oauth = s.oauth || {};
+
+  const oauthBadge = oauth.authenticated
+    ? '<span style="background: rgba(34, 197, 94, 0.15); color: #4ade80; padding: 4px 10px; border-radius: 4px; font-weight: 600; font-size: 12px;">🟢 Google Connected (Gmail + Calendar)</span>'
+    : '<span style="background: rgba(148, 163, 184, 0.15); color: #94a3b8; padding: 4px 10px; border-radius: 4px; font-size: 12px;">⚪ Local Mode (Synthetic / Offline Active)</span>';
+
+  bodyEl.innerHTML = `
+    <!-- Top Summary Strip -->
+    <div style="background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 14px; margin-bottom: 20px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <div>
+          <span style="font-size: 13px; color: #94a3b8;">OAuth Status:</span>
+          ${oauthBadge}
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn btn-outline btn-sm" onclick="syncEmails()">🔄 Sync Now</button>
+          <button class="btn btn-outline btn-sm" onclick="openOAuthModal()">⚙️ Settings</button>
+        </div>
+      </div>
+
+      <!-- Quick Metrics Grid -->
+      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;">
+        <div style="background: #1e293b; padding: 10px; border-radius: 6px; text-align: center; border-left: 3px solid #3b82f6;">
+          <div style="font-size: 20px; font-weight: 700; color: #93c5fd;">${commsHubState.recentEmails.length}</div>
+          <div style="font-size: 11px; color: #94a3b8;">Recruiter Emails</div>
+        </div>
+        <div style="background: #1e293b; padding: 10px; border-radius: 6px; text-align: center; border-left: 3px solid #10b981;">
+          <div style="font-size: 20px; font-weight: 700; color: #6ee7b7;">${commsHubState.upcomingInterviews.length}</div>
+          <div style="font-size: 11px; color: #94a3b8;">Scheduled Interviews</div>
+        </div>
+        <div style="background: #1e293b; padding: 10px; border-radius: 6px; text-align: center; border-left: 3px solid #f59e0b;">
+          <div style="font-size: 20px; font-weight: 700; color: #fcd34d;">${commsHubState.pendingReminders.length}</div>
+          <div style="font-size: 11px; color: #94a3b8;">Pending Follow-Ups</div>
+        </div>
+        <div style="background: #1e293b; padding: 10px; border-radius: 6px; text-align: center; border-left: 3px solid #a855f7;">
+          <div style="font-size: 20px; font-weight: 700; color: #d8b4fe;">${commsHubState.pendingDrafts.length}</div>
+          <div style="font-size: 11px; color: #94a3b8;">Drafts Awaiting Approval</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <div style="display: flex; gap: 8px; border-bottom: 1px solid #334155; margin-bottom: 16px;">
+      <button class="filter-tab ${commsHubState.activeTab === 'emails' ? 'active' : ''}" onclick="switchCommsTab('emails')">📬 Recruiter Emails (${commsHubState.recentEmails.length})</button>
+      <button class="filter-tab ${commsHubState.activeTab === 'calendar' ? 'active' : ''}" onclick="switchCommsTab('calendar')">📅 Interviews & Calendar (${commsHubState.upcomingInterviews.length})</button>
+      <button class="filter-tab ${commsHubState.activeTab === 'reminders' ? 'active' : ''}" onclick="switchCommsTab('reminders')">⏰ Follow-Ups (${commsHubState.pendingReminders.length})</button>
+      <button class="filter-tab ${commsHubState.activeTab === 'drafts' ? 'active' : ''}" onclick="switchCommsTab('drafts')">✍️ Pending Drafts (${commsHubState.pendingDrafts.length})</button>
+    </div>
+
+    <!-- Tab Content -->
+    <div id="commsTabContent">
+      ${renderTabContent()}
+    </div>
+  `;
+}
+
+window.switchCommsTab = function(tabName) {
+  commsHubState.activeTab = tabName;
+  renderCommsHub();
+};
+
+function renderTabContent() {
+  switch (commsHubState.activeTab) {
+    case 'calendar':
+      return renderCalendarTab();
+    case 'reminders':
+      return renderRemindersTab();
+    case 'drafts':
+      return renderDraftsTab();
+    case 'emails':
+    default:
+      return renderEmailsTab();
+  }
+}
+
+function renderEmailsTab() {
+  const emails = commsHubState.recentEmails;
+  if (emails.length === 0) {
+    return `
+      <div style="text-align: center; padding: 40px; color: #94a3b8;">
+        <p>No recruiter emails synchronized yet.</p>
+        <button class="btn btn-outline btn-sm" style="margin-top: 12px;" onclick="syncEmails()">🔄 Sync Now</button>
+      </div>
+    `;
+  }
+
+  return emails.map(e => {
+    let ext = {};
+    try { ext = e.extracted_data_json ? JSON.parse(e.extracted_data_json) : {}; } catch {}
+
+    const categoryBadges = {
+      INTERVIEW_INVITATION: '<span style="background: rgba(16, 185, 129, 0.15); color: #34d399; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">🎉 INTERVIEW INVITATION</span>',
+      ASSESSMENT: '<span style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">💻 CODING ASSESSMENT</span>',
+      OFFER: '<span style="background: rgba(168, 85, 247, 0.15); color: #c084fc; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">🌟 JOB OFFER</span>',
+      REJECTION: '<span style="background: rgba(239, 68, 68, 0.15); color: #f87171; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">⛔ REJECTION</span>',
+      APPLICATION_ACKNOWLEDGED: '<span style="background: rgba(148, 163, 184, 0.15); color: #cbd5e1; padding: 2px 8px; border-radius: 4px; font-size: 11px;">📄 ACKNOWLEDGED</span>',
+      RECRUITER_REQUEST: '<span style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">❓ RECRUITER REQUEST</span>',
+      UNCERTAIN_MANUAL_REVIEW: '<span style="background: rgba(245, 158, 11, 0.2); color: #f59e0b; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">⚠️ MANUAL REVIEW</span>'
+    };
+
+    const badge = categoryBadges[e.category] || '<span style="background: rgba(148, 163, 184, 0.15); color: #94a3b8; padding: 2px 8px; border-radius: 4px; font-size: 11px;">GENERAL</span>';
+    const comp = e.job_company || ext.company || 'Unknown Company';
+    const role = e.job_title || ext.role || 'Software Role';
+
+    return `
+      <div style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 14px; margin-bottom: 12px;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
+          <div>
+            <span style="font-weight: 600; font-size: 14px; color: #f1f5f9;">${escapeHtml(e.subject)}</span>
+            <div style="font-size: 12px; color: #94a3b8; margin-top: 2px;">
+              From: <strong style="color: #cbd5e1;">${escapeHtml(e.sender)}</strong> • ${new Date(e.received_at || e.created_at).toLocaleDateString()}
+            </div>
+          </div>
+          <div>${badge}</div>
+        </div>
+
+        <!-- Extracted Metadata -->
+        <div style="background: #0f172a; padding: 10px; border-radius: 6px; margin: 8px 0; font-size: 12px; color: #cbd5e1; display: flex; flex-wrap: wrap; gap: 14px;">
+          <div>🏢 <strong>Company:</strong> ${escapeHtml(comp)}</div>
+          <div>💼 <strong>Role:</strong> ${escapeHtml(role)}</div>
+          ${ext.recruiter?.name ? `<div>👤 <strong>Recruiter:</strong> ${escapeHtml(ext.recruiter.name)}</div>` : ''}
+          ${ext.interview?.rawTime ? `<div>🕒 <strong>Schedule:</strong> ${escapeHtml(ext.interview.rawDate || '')} at ${escapeHtml(ext.interview.rawTime)} (${ext.interview.timezone})</div>` : ''}
+          ${ext.meetingLink ? `<div>🔗 <a href="${escapeHtml(ext.meetingLink)}" target="_blank" style="color: #38bdf8;">Join Meeting Link</a></div>` : ''}
+        </div>
+
+        ${ext.nextAction ? `<div style="font-size: 12px; color: #38bdf8; margin-bottom: 10px;">👉 <strong>Action Required:</strong> ${escapeHtml(ext.nextAction)}</div>` : ''}
+
+        <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #334155; padding-top: 8px;">
+          <small style="color: #64748b; font-size: 11px;">Confidence: <strong>${e.confidence || 'high'}</strong></small>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn btn-primary btn-sm" onclick="openDraftModal(${e.id}, 'recruiter_reply', ${e.job_id || 'null'}, '${escapeHtml(comp)}', '${escapeHtml(role)}', '${escapeHtml(ext.recruiter?.name || 'Hiring Team')}', '${escapeHtml(ext.recruiter?.email || e.sender)}')">
+              ✍️ Generate Draft Reply
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderCalendarTab() {
+  const events = commsHubState.upcomingInterviews;
+  if (events.length === 0) {
+    return `
+      <div style="text-align: center; padding: 40px; color: #94a3b8;">
+        <p>No upcoming interviews on your calendar.</p>
+        <p style="font-size: 12px; margin-top: 6px;">Interviews detected in recruiter emails will be proposed here automatically.</p>
+      </div>
+    `;
+  }
+
+  return events.map(ev => {
+    const isApproved = ev.status === 'approved_created';
+    const statusBadge = isApproved
+      ? '<span style="background: rgba(34, 197, 94, 0.15); color: #4ade80; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">✓ ADDED TO CALENDAR</span>'
+      : '<span style="background: rgba(234, 179, 8, 0.15); color: #facc15; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">⚡ PROPOSED (REVIEW REQUIRED)</span>';
+
+    return `
+      <div style="background: #1e293b; border: 1px solid ${ev.conflict_detected ? '#ef4444' : '#334155'}; border-radius: 8px; padding: 14px; margin-bottom: 12px;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
+          <div>
+            <strong style="color: #f8fafc; font-size: 14px;">${escapeHtml(ev.title)}</strong>
+            <div style="font-size: 12px; color: #94a3b8; margin-top: 2px;">
+              🏢 ${escapeHtml(ev.company || 'Company')} • 💼 ${escapeHtml(ev.role || 'Software Role')}
+            </div>
+          </div>
+          <div>${statusBadge}</div>
+        </div>
+
+        ${ev.conflict_detected ? `
+          <div style="background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #fca5a5; padding: 8px 12px; border-radius: 6px; font-size: 12px; margin: 8px 0;">
+            ⚠️ <strong>Scheduling Conflict Detected:</strong> ${escapeHtml(ev.conflict_details || 'Overlaps with another calendar event')}
+          </div>
+        ` : ''}
+
+        <div style="background: #0f172a; padding: 10px; border-radius: 6px; margin: 8px 0; font-size: 12px; color: #cbd5e1; display: flex; flex-wrap: wrap; gap: 14px;">
+          <div>🕒 <strong>Time:</strong> ${new Date(ev.start_time).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })} IST</div>
+          ${ev.recruiter_name ? `<div>👤 <strong>Recruiter:</strong> ${escapeHtml(ev.recruiter_name)}</div>` : ''}
+          ${ev.meeting_link ? `<div>🔗 <a href="${escapeHtml(ev.meeting_link)}" target="_blank" style="color: #38bdf8;">Join Google Meet / Zoom</a></div>` : ''}
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid #334155; padding-top: 8px;">
+          ${!isApproved ? `
+            <button class="btn btn-primary btn-sm" onclick="executeApproveCalendarEvent(${ev.id})" style="background: #10b981; border: none;">
+              ✅ Approve & Add to Calendar
+            </button>
+          ` : `
+            <button class="btn btn-outline btn-sm" onclick="executeCancelCalendarEvent(${ev.id})" style="color: #ef4444;">
+              ❌ Cancel Event
+            </button>
+          `}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderRemindersTab() {
+  const reminders = commsHubState.pendingReminders;
+  if (reminders.length === 0) {
+    return `
+      <div style="text-align: center; padding: 40px; color: #94a3b8;">
+        <p>No pending follow-ups or reminders. You are completely caught up!</p>
+      </div>
+    `;
+  }
+
+  return reminders.map(r => {
+    const priorityColors = { high: '#ef4444', medium: '#f59e0b', low: '#3b82f6' };
+    const pColor = priorityColors[r.priority] || '#94a3b8';
+
+    return `
+      <div style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 14px; margin-bottom: 12px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+          <strong style="color: #f8fafc; font-size: 14px;">${escapeHtml(r.title)}</strong>
+          <span style="border: 1px solid ${pColor}; color: ${pColor}; font-size: 11px; padding: 1px 6px; border-radius: 4px; text-transform: uppercase;">
+            ${r.priority}
+          </span>
+        </div>
+        <p style="font-size: 12px; color: #cbd5e1; margin-bottom: 6px;">${escapeHtml(r.notes || '')}</p>
+        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #94a3b8; border-top: 1px solid #334155; padding-top: 8px;">
+          <div>📅 Due: <strong style="color: #f1f5f9;">${new Date(r.due_date).toLocaleDateString()}</strong></div>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn btn-outline btn-sm" onclick="executeCompleteReminder(${r.id}, 'dismissed')">Dismiss</button>
+            <button class="btn btn-primary btn-sm" onclick="executeCompleteReminder(${r.id}, 'completed')" style="background: #10b981; border: none;">✓ Complete</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderDraftsTab() {
+  const drafts = commsHubState.pendingDrafts;
+  if (drafts.length === 0) {
+    return `
+      <div style="text-align: center; padding: 40px; color: #94a3b8;">
+        <p>No email drafts awaiting approval.</p>
+        <p style="font-size: 12px; margin-top: 6px;">When drafts are prepared for follow-ups or replies, they will appear here for review.</p>
+      </div>
+    `;
+  }
+
+  return drafts.map(d => `
+    <div style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 14px; margin-bottom: 12px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <strong style="color: #f1f5f9; font-size: 14px;">${escapeHtml(d.subject)}</strong>
+        <span style="background: rgba(245, 158, 11, 0.15); color: #f59e0b; padding: 2px 8px; border-radius: 4px; font-size: 11px;">PENDING APPROVAL</span>
+      </div>
+      <div style="font-size: 12px; color: #94a3b8; margin-bottom: 8px;">
+        To: <strong style="color: #cbd5e1;">${escapeHtml(d.recipient || 'Recruiter')}</strong>
+      </div>
+      <pre style="background: #0f172a; padding: 10px; border-radius: 6px; font-size: 12px; color: #cbd5e1; max-height: 140px; overflow-y: auto; white-space: pre-wrap; margin-bottom: 10px;">${escapeHtml(d.body)}</pre>
+      <div style="display: flex; justify-content: flex-end; gap: 8px;">
+        <button class="btn btn-primary btn-sm" onclick="executeApproveDraft(${d.id})" style="background: #2563eb; border: none;">
+          🚀 Approve & Stage to Gmail
+        </button>
+      </div>
+    </div>
+  `).join('');
+}
+
+window.syncEmails = async function() {
+  const btn = document.getElementById('syncEmailsBtn');
+  if (btn) btn.textContent = '⏳ Syncing...';
+  try {
+    const resp = await fetch('/api/communications/sync', { method: 'POST' });
+    const data = await resp.json();
+    alert(`Sync complete!\nFound: ${data.messagesFound || 0} messages\nImported: ${data.messagesImported || 0}\nSkipped (Duplicates): ${data.messagesSkippedDuplicate || 0}`);
+    await openCommsHubModal(commsHubState.activeTab);
+  } catch (err) {
+    alert('Sync error: ' + err.message);
+  } finally {
+    if (btn) btn.textContent = '🔄 Sync Inbox';
+  }
+};
+
+window.openDraftModal = async function(commId, draftType = 'recruiter_reply', jobId = null, comp = '', role = '', recName = 'Hiring Team', recEmail = '') {
+  openModal('Generate Communication Draft', '<div class="loading"><div class="spinner"></div><p>Generating evidence-grounded draft...</p></div>');
+  try {
+    const resp = await fetch('/api/communications/draft', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        draftType,
+        jobId,
+        recruiterName: recName,
+        recruiterEmail: recEmail
+      })
+    });
+    const data = await resp.json();
+    if (!data.success) throw new Error(data.error);
+
+    const draft = data.draft;
+    document.getElementById('modalBody').innerHTML = `
+      <div>
+        <div style="margin-bottom: 12px;">
+          <label style="display: block; font-size: 12px; color: #94a3b8; margin-bottom: 4px;">Recipient Email:</label>
+          <input type="email" id="draftRecipientInput" value="${escapeHtml(draft.to || recEmail)}" style="width: 100%; background: #0f172a; border: 1px solid #475569; color: white; padding: 8px; border-radius: 6px; font-size: 13px;" />
+        </div>
+        <div style="margin-bottom: 12px;">
+          <label style="display: block; font-size: 12px; color: #94a3b8; margin-bottom: 4px;">Subject:</label>
+          <input type="text" id="draftSubjectInput" value="${escapeHtml(draft.subject)}" style="width: 100%; background: #0f172a; border: 1px solid #475569; color: white; padding: 8px; border-radius: 6px; font-size: 13px;" />
+        </div>
+        <div style="margin-bottom: 16px;">
+          <label style="display: block; font-size: 12px; color: #94a3b8; margin-bottom: 4px;">Message Body:</label>
+          <textarea id="draftBodyInput" rows="12" style="width: 100%; background: #0f172a; border: 1px solid #475569; color: white; padding: 8px; border-radius: 6px; font-size: 13px; font-family: monospace;">${escapeHtml(draft.body)}</textarea>
+        </div>
+
+        <!-- Safety Notice -->
+        <div style="background: rgba(30, 58, 138, 0.4); border: 1px solid #2563eb; padding: 10px; border-radius: 6px; font-size: 12px; color: #bfdbfe; margin-bottom: 16px;">
+          🔒 <strong>Mandatory Human Approval Rule:</strong> Outbound emails require explicit candidate approval. CareerOS will never transmit emails automatically.
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+          <button class="btn btn-outline" onclick="closeModal()">Close</button>
+          <button class="btn btn-primary" onclick="executeApproveDraft(${data.draftId})">
+            🚀 Approve & Stage to Gmail
+          </button>
+        </div>
+      </div>
+    `;
+  } catch (err) {
+    document.getElementById('modalBody').innerHTML = `<p class="text-danger">Failed to generate draft: ${err.message}</p>`;
+  }
+};
+
+window.executeApproveDraft = async function(draftId) {
+  try {
+    const resp = await fetch(`/api/communications/draft/${draftId}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userConfirmedApproval: true })
+    });
+    const result = await resp.json();
+    if (!result.success) throw new Error(result.error);
+
+    alert('Draft approved successfully and saved to your Gmail drafts inbox!');
+    closeModal();
+    if (!document.getElementById('commsModal').classList.contains('hidden')) {
+      await openCommsHubModal('drafts');
+    }
+  } catch (err) {
+    alert('Approval error: ' + err.message);
+  }
+};
+
+window.executeApproveCalendarEvent = async function(eventId) {
+  try {
+    const resp = await fetch(`/api/calendar/event/${eventId}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userConfirmed: true })
+    });
+    const result = await resp.json();
+    if (!result.success) throw new Error(result.error);
+
+    alert('Interview event approved and scheduled in Google Calendar!');
+    await openCommsHubModal('calendar');
+  } catch (err) {
+    alert('Calendar error: ' + err.message);
+  }
+};
+
+window.executeCancelCalendarEvent = async function(eventId) {
+  if (!confirm('Are you sure you want to cancel this interview calendar event?')) return;
+  try {
+    const resp = await fetch(`/api/calendar/event/${eventId}/cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userConfirmed: true })
+    });
+    const result = await resp.json();
+    if (!result.success) throw new Error(result.error);
+
+    alert('Calendar event cancelled.');
+    await openCommsHubModal('calendar');
+  } catch (err) {
+    alert('Cancel error: ' + err.message);
+  }
+};
+
+window.executeCompleteReminder = async function(reminderId, status = 'completed') {
+  try {
+    const resp = await fetch(`/api/reminders/${reminderId}/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status })
+    });
+    const result = await resp.json();
+    if (!result.success) throw new Error(result.error);
+
+    await openCommsHubModal('reminders');
+  } catch (err) {
+    alert('Reminder error: ' + err.message);
+  }
+};
+
+window.openOAuthModal = async function() {
+  openModal('Google OAuth & Security Settings', '<div class="loading"><div class="spinner"></div><p>Checking OAuth status...</p></div>');
+  try {
+    const resp = await fetch('/api/oauth/status');
+    const status = await resp.json();
+
+    document.getElementById('modalBody').innerHTML = `
+      <div style="padding: 10px;">
+        <div style="background: #0f172a; padding: 14px; border-radius: 8px; margin-bottom: 16px; border: 1px solid #334155;">
+          <h4 style="margin-bottom: 8px; color: #f1f5f9;">Connected Google Scopes (Minimum Required)</h4>
+          <ul style="padding-left: 20px; font-size: 12px; color: #94a3b8; line-height: 1.6;">
+            <li><code>gmail.readonly</code> — Read recruiter emails and application confirmations</li>
+            <li><code>gmail.compose</code> — Create draft replies requiring candidate review</li>
+            <li><code>calendar.events</code> — Schedule and review interview events</li>
+            <li><code>calendar.readonly</code> — Check for interview time conflicts</li>
+          </ul>
+        </div>
+
+        <div style="margin-bottom: 20px; font-size: 13px; color: #cbd5e1;">
+          Status: <strong>${status.authenticated ? '<span style="color: #4ade80;">Authenticated & Active</span>' : '<span style="color: #94a3b8;">Not Connected (Offline / Synthetic Mode)</span>'}</strong><br>
+          ${status.expiresAt ? `Token Expiry: <span>${new Date(status.expiresAt).toLocaleString()}</span>` : ''}
+        </div>
+
+        <div style="display: flex; justify-content: space-between; gap: 10px; border-top: 1px solid #334155; padding-top: 16px;">
+          <button class="btn btn-outline" onclick="closeModal()">Close</button>
+          <div style="display: flex; gap: 10px;">
+            ${status.authenticated ? `
+              <button class="btn btn-outline" onclick="executeDisconnectOAuth()" style="color: #ef4444;">
+                Disconnect Google Account
+              </button>
+            ` : `
+              <a href="/api/oauth/url" target="_blank" class="btn btn-primary">
+                🔗 Connect Google Account
+              </a>
+            `}
+          </div>
+        </div>
+      </div>
+    `;
+  } catch (err) {
+    document.getElementById('modalBody').innerHTML = `<p class="text-danger">Failed to load OAuth status: ${err.message}</p>`;
+  }
+};
+
+window.executeDisconnectOAuth = async function() {
+  if (!confirm('Are you sure you want to disconnect your Google account and revoke OAuth tokens?')) return;
+  try {
+    const resp = await fetch('/api/oauth/disconnect', { method: 'POST' });
+    const result = await resp.json();
+    alert(result.message || 'Disconnected successfully.');
+    closeModal();
+    if (!document.getElementById('commsModal').classList.contains('hidden')) {
+      await openCommsHubModal();
+    }
+  } catch (err) {
+    alert('Disconnect error: ' + err.message);
+  }
+};
+
+// ==========================================
+// PHASE 5: CAREER INTELLIGENCE & GROWTH
+// ==========================================
+
+const careerIntelState = {
+  activeTab: 'skills',
+  gaps: null,
+  roadmap: [],
+  stories: [],
+  storyCategory: 'all',
+  analytics: null,
+  rejections: null,
+  mockSession: null,
+  mockHistory: [],
+  salaryCalc: null
+};
+
+window.openCareerIntelligenceModal = async function(activeTab = 'skills') {
+  careerIntelState.activeTab = activeTab;
+  const modal = document.getElementById('careerIntelModal');
+  modal.classList.remove('hidden');
+
+  const bodyEl = document.getElementById('careerIntelModalBody');
+  bodyEl.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading Career Intelligence & Growth Engine...</p></div>';
+
+  try {
+    // Preload roadmap and gaps
+    const [gapRes, roadRes] = await Promise.all([
+      fetch('/api/intelligence/skill-gaps').then(r => r.json()),
+      fetch('/api/intelligence/roadmap').then(r => r.json())
+    ]);
+
+    careerIntelState.gaps = gapRes;
+    careerIntelState.roadmap = roadRes.roadmap || [];
+
+    renderCareerIntelHub();
+  } catch (err) {
+    bodyEl.innerHTML = `<p class="text-danger">Failed to load career intelligence: ${err.message}</p>`;
+  }
+};
+
+function renderCareerIntelHub() {
+  const bodyEl = document.getElementById('careerIntelModalBody');
+  bodyEl.innerHTML = `
+    <!-- Navigation Tabs -->
+    <div style="display: flex; gap: 8px; border-bottom: 1px solid #334155; margin-bottom: 20px;">
+      <button class="filter-tab ${careerIntelState.activeTab === 'skills' ? 'active' : ''}" onclick="switchCareerIntelTab('skills')">🎯 Skill Gaps & Roadmap</button>
+      <button class="filter-tab ${careerIntelState.activeTab === 'stories' ? 'active' : ''}" onclick="switchCareerIntelTab('stories')">📚 STAR Story Bank</button>
+      <button class="filter-tab ${careerIntelState.activeTab === 'mock' ? 'active' : ''}" onclick="switchCareerIntelTab('mock')">🎙️ Mock Interview</button>
+      <button class="filter-tab ${careerIntelState.activeTab === 'analytics' ? 'active' : ''}" onclick="switchCareerIntelTab('analytics')">📊 Funnel & Rejections</button>
+      <button class="filter-tab ${careerIntelState.activeTab === 'salary' ? 'active' : ''}" onclick="switchCareerIntelTab('salary')">💰 Salary & Offer Calculator</button>
+    </div>
+
+    <!-- Active Tab Container -->
+    <div id="careerIntelTabContent">
+      ${renderCareerIntelTabContent()}
+    </div>
+  `;
+}
+
+window.switchCareerIntelTab = async function(tabName) {
+  careerIntelState.activeTab = tabName;
+  const bodyEl = document.getElementById('careerIntelTabContent');
+  bodyEl.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading section...</p></div>';
+
+  try {
+    if (tabName === 'stories' && careerIntelState.stories.length === 0) {
+      const res = await fetch('/api/intelligence/stories').then(r => r.json());
+      careerIntelState.stories = res.stories || [];
+    } else if (tabName === 'analytics' && !careerIntelState.analytics) {
+      const [anRes, rejRes] = await Promise.all([
+        fetch('/api/intelligence/analytics').then(r => r.json()),
+        fetch('/api/intelligence/rejections').then(r => r.json())
+      ]);
+      careerIntelState.analytics = anRes.analytics;
+      careerIntelState.rejections = rejRes.rejections;
+    } else if (tabName === 'mock' && careerIntelState.mockHistory.length === 0) {
+      const res = await fetch('/api/intelligence/mock/history').then(r => r.json());
+      careerIntelState.mockHistory = res.history || [];
+    } else if (tabName === 'salary' && !careerIntelState.salaryCalc) {
+      const res = await fetch('/api/intelligence/salary/calculate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ctcAnnual: 500000, location: 'Bengaluru', workMode: 'onsite' })
+      }).then(r => r.json());
+      careerIntelState.salaryCalc = res.calculation;
+    }
+  } catch (err) {
+    console.error('Tab load error:', err);
+  }
+
+  renderCareerIntelHub();
+};
+
+function renderCareerIntelTabContent() {
+  switch (careerIntelState.activeTab) {
+    case 'stories':
+      return renderStoriesTabHtml();
+    case 'mock':
+      return renderMockTabHtml();
+    case 'analytics':
+      return renderAnalyticsTabHtml();
+    case 'salary':
+      return renderSalaryTabHtml();
+    case 'skills':
+    default:
+      return renderSkillsTabHtml();
+  }
+}
+
+// ----------------------------------------------------
+// TAB 1: SKILL GAPS & ROADMAP
+// ----------------------------------------------------
+function renderSkillsTabHtml() {
+  const g = careerIntelState.gaps || {};
+  const s = g.summary || {};
+  const roadmap = careerIntelState.roadmap || [];
+
+  return `
+    <div style="display: flex; flex-direction: column; gap: 20px;">
+      <!-- Summary Strip -->
+      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
+        <div style="background: #0f172a; padding: 14px; border-radius: 8px; border: 1px solid #334155; border-left: 4px solid #10b981;">
+          <div style="font-size: 24px; font-weight: 700; color: #4ade80;">${s.existingCount || 0}</div>
+          <div style="font-size: 12px; color: #94a3b8; font-weight: 600;">Verified Strengths</div>
+          <div style="font-size: 11px; color: #64748b; margin-top: 4px;">Java, Spring Boot, React, SQL, PostGIS, REST</div>
+        </div>
+        <div style="background: #0f172a; padding: 14px; border-radius: 8px; border: 1px solid #334155; border-left: 4px solid #38bdf8;">
+          <div style="font-size: 24px; font-weight: 700; color: #38bdf8;">${roadmap.filter(r => r.status === 'in_progress').length}</div>
+          <div style="font-size: 12px; color: #94a3b8; font-weight: 600;">In Progress Roadmap</div>
+          <div style="font-size: 11px; color: #64748b; margin-top: 4px;">Active practical project targets</div>
+        </div>
+        <div style="background: #0f172a; padding: 14px; border-radius: 8px; border: 1px solid #334155; border-left: 4px solid #f59e0b;">
+          <div style="font-size: 24px; font-weight: 700; color: #fcd34d;">${s.missingCount || 0}</div>
+          <div style="font-size: 12px; color: #94a3b8; font-weight: 600;">Market Gap Demand</div>
+          <div style="font-size: 11px; color: #64748b; margin-top: 4px;">Requested in active Fresher/Junior JDs</div>
+        </div>
+      </div>
+
+      <!-- Priority Learning Roadmap -->
+      <div style="background: #0f172a; padding: 16px; border-radius: 8px; border: 1px solid #334155;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+          <div>
+            <h3 style="margin: 0; font-size: 15px; color: #f8fafc;">Priority Learning Roadmap & Practical Targets</h3>
+            <span style="font-size: 12px; color: #94a3b8;">Strict Gatekeeper: Skills can only be marked acquired with verified evidence</span>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="promptAddRoadmapSkill()">+ Add Skill Target</button>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          ${roadmap.map(item => `
+            <div style="background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 12px; display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <strong style="color: #f1f5f9; font-size: 14px;">${item.skillName.toUpperCase()}</strong>
+                  <span style="font-size: 10px; padding: 2px 8px; border-radius: 4px; font-weight: 600; text-transform: uppercase; ${item.priority === 'critical' ? 'background: rgba(239, 68, 68, 0.2); color: #f87171;' : item.priority === 'high' ? 'background: rgba(245, 158, 11, 0.2); color: #fbbf24;' : 'background: rgba(56, 189, 248, 0.2); color: #38bdf8;'}">${item.priority}</span>
+                  <span style="font-size: 10px; padding: 2px 8px; border-radius: 4px; font-weight: 600; ${item.status === 'acquired' ? 'background: rgba(34, 197, 94, 0.2); color: #4ade80;' : item.status === 'in_progress' ? 'background: rgba(56, 189, 248, 0.2); color: #38bdf8;' : 'background: rgba(148, 163, 184, 0.2); color: #94a3b8;'}">${item.status.toUpperCase()}</span>
+                </div>
+                <div style="font-size: 12px; color: #cbd5e1; margin-top: 4px;">
+                  💡 <strong>Project:</strong> ${item.recommendedProjectIdea || 'Build proof-of-concept prototype'}
+                </div>
+                ${item.verifiedEvidence ? `<div style="font-size: 11px; color: #4ade80; margin-top: 3px;">✅ <strong>Verified Proof:</strong> ${item.verifiedEvidence}</div>` : ''}
+              </div>
+              <div style="display: flex; gap: 6px;">
+                ${item.status !== 'acquired' ? `
+                  <button class="btn btn-outline btn-sm" onclick="promptMarkAcquired('${item.skillName}')" style="color: #4ade80;">Mark Acquired</button>
+                ` : '<span style="font-size: 12px; color: #4ade80; font-weight: 600;">Verified ✅</span>'}
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+
+      <!-- Top Missing Market Gaps with Free Resources -->
+      <div style="background: #0f172a; padding: 16px; border-radius: 8px; border: 1px solid #334155;">
+        <h3 style="margin: 0 0 10px 0; font-size: 15px; color: #f8fafc;">Top Market Gaps & Free Learning Resources</h3>
+        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
+          ${(g.topGaps || []).slice(0, 6).map(gap => `
+            <div style="background: #1e293b; padding: 10px; border-radius: 6px; border: 1px solid #334155;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <strong style="color: #93c5fd; font-size: 13px;">${gap.skill.toUpperCase()}</strong>
+                <span style="font-size: 11px; color: #94a3b8;">${gap.totalDemand} JDs (${gap.marketPercentage}%)</span>
+              </div>
+              <div style="font-size: 11px; color: #cbd5e1; margin: 4px 0;">${gap.recommendedProject}</div>
+              <div style="margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap;">
+                ${(gap.learningResources || []).map(r => `<a href="${r.url}" target="_blank" style="font-size: 11px; color: #38bdf8; text-decoration: none; background: rgba(56, 189, 248, 0.1); padding: 2px 6px; border-radius: 3px;">🔗 ${r.name}</a>`).join('')}
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+window.promptMarkAcquired = async function(skillName) {
+  const evidence = prompt(`Strict Verification Gatekeeper:\nEnter verified proof or tangible project evidence where you implemented "${skillName}" (e.g. "Containerized NearVia in docker-compose" or GitHub commit):`);
+  if (!evidence) return;
+
+  try {
+    const resp = await fetch('/api/intelligence/roadmap/item', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ skillName, status: 'acquired', verifiedEvidence: evidence })
+    });
+    const result = await resp.json();
+    if (!result.success) throw new Error(result.error);
+
+    alert(`Successfully verified and marked "${skillName}" as acquired!`);
+    await openCareerIntelligenceModal('skills');
+  } catch (err) {
+    alert('Verification Error: ' + err.message);
+  }
+};
+
+window.promptAddRoadmapSkill = async function() {
+  const skill = prompt('Enter the skill name you want to target (e.g. Docker, Kafka, AWS, Next.js):');
+  if (!skill) return;
+
+  try {
+    const resp = await fetch('/api/intelligence/roadmap/item', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ skillName: skill, status: 'in_progress', priority: 'high' })
+    });
+    const result = await resp.json();
+    if (!result.success) throw new Error(result.error);
+
+    await openCareerIntelligenceModal('skills');
+  } catch (err) {
+    alert('Error: ' + err.message);
+  }
+};
+
+// ----------------------------------------------------
+// TAB 2: STAR STORY BANK
+// ----------------------------------------------------
+function renderStoriesTabHtml() {
+  const stories = careerIntelState.stories || [];
+
+  return `
+    <div style="display: flex; flex-direction: column; gap: 16px;">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+          <h3 style="margin: 0; font-size: 15px; color: #f8fafc;">Evidence-Backed STAR Interview Story Bank</h3>
+          <span style="font-size: 12px; color: #94a3b8;">Reusable, verified accomplishments formatted in Situation, Task, Action, and Result</span>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <input type="text" id="storySearchInput" placeholder="Filter stories..." oninput="filterStoriesUi(this.value)" style="background: #1e293b; border: 1px solid #475569; color: #f8fafc; padding: 4px 8px; border-radius: 4px; font-size: 12px;" />
+        </div>
+      </div>
+
+      <div id="storiesContainer" style="display: flex; flex-direction: column; gap: 12px;">
+        ${stories.map((s, idx) => `
+          <div class="story-card" style="background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 14px;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+              <div>
+                <strong style="font-size: 14px; color: #93c5fd;">#${idx + 1} — ${s.title}</strong>
+                <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">
+                  Context: <strong>${s.contextSource}</strong> • Category: <span style="color: #fcd34d;">${s.category}</span>
+                </div>
+              </div>
+              <button class="btn btn-outline btn-sm" onclick="copyStoryText(${s.id})">📋 Copy STAR</button>
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; font-size: 12px; margin-top: 8px;">
+              <div style="background: #1e293b; padding: 8px; border-radius: 4px; border-left: 3px solid #38bdf8;">
+                <strong style="color: #38bdf8;">S (Situation):</strong>
+                <p style="margin: 4px 0 0 0; color: #cbd5e1;">${s.situation}</p>
+              </div>
+              <div style="background: #1e293b; padding: 8px; border-radius: 4px; border-left: 3px solid #f59e0b;">
+                <strong style="color: #f59e0b;">T (Task):</strong>
+                <p style="margin: 4px 0 0 0; color: #cbd5e1;">${s.task}</p>
+              </div>
+              <div style="background: #1e293b; padding: 8px; border-radius: 4px; border-left: 3px solid #a855f7;">
+                <strong style="color: #a855f7;">A (Action):</strong>
+                <p style="margin: 4px 0 0 0; color: #cbd5e1;">${s.action}</p>
+              </div>
+              <div style="background: #1e293b; padding: 8px; border-radius: 4px; border-left: 3px solid #10b981;">
+                <strong style="color: #10b981;">R (Result):</strong>
+                <p style="margin: 4px 0 0 0; color: #cbd5e1;">${s.result}</p>
+              </div>
+            </div>
+
+            ${s.technologies ? `<div style="font-size: 11px; color: #94a3b8; margin-top: 8px;">🛠️ <strong>Technologies:</strong> ${s.technologies}</div>` : ''}
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+window.copyStoryText = function(storyId) {
+  const story = (careerIntelState.stories || []).find(s => s.id === storyId);
+  if (!story) return;
+
+  const text = `STAR Interview Story: ${story.title} (${story.contextSource})\n\n[Situation]: ${story.situation}\n[Task]: ${story.task}\n[Action]: ${story.action}\n[Result]: ${story.result}\n\nTechnologies: ${story.technologies}`;
+  navigator.clipboard.writeText(text);
+  alert('Copied STAR Story to clipboard!');
+};
+
+// ----------------------------------------------------
+// TAB 3: MOCK INTERVIEW SIMULATOR
+// ----------------------------------------------------
+function renderMockTabHtml() {
+  const session = careerIntelState.mockSession;
+
+  if (!session) {
+    // Session setup view
+    return `
+      <div style="background: #0f172a; padding: 20px; border-radius: 8px; border: 1px solid #334155; max-width: 600px; margin: 0 auto; text-align: center;">
+        <h3 style="margin-top: 0; color: #f8fafc;">Interactive Mock Interview Simulator</h3>
+        <p style="font-size: 13px; color: #94a3b8;">Practice one question at a time. The evaluator assesses relevance, technical correctness, and STAR structure, providing strengths and concrete coaching suggestions.</p>
+
+        <div style="margin: 20px 0; text-align: left;">
+          <label style="font-size: 12px; color: #cbd5e1; font-weight: 600; display: block; margin-bottom: 6px;">Select Interview Focus:</label>
+          <select id="mockInterviewType" style="width: 100%; background: #1e293b; border: 1px solid #475569; color: #f8fafc; padding: 8px; border-radius: 6px;">
+            <option value="technical">Technical: Java, Spring Boot, React, SQL & Architecture</option>
+            <option value="project">Project Deep Dive: NearVia, Leave Management, Smart Rover</option>
+            <option value="behavioral">Behavioral & HR: Teamwork, Challenges & Transition</option>
+            <option value="mixed">Mixed Round: 2 Technical, 1 Project, 1 Behavioral</option>
+          </select>
+        </div>
+
+        <button class="btn btn-primary" onclick="startMockUiSession()">🚀 Start Practice Round</button>
+        <p style="font-size: 11px; color: #64748b; margin-top: 16px;">Notice: Automated scores are for self-coaching and do not represent official employer assessments.</p>
+      </div>
+    `;
+  }
+
+  // Active or Finished Session View
+  const isDone = session.isFinished;
+  const currQ = session.nextQuestion || session.currentQuestion;
+
+  return `
+    <div style="display: flex; flex-direction: column; gap: 16px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; background: #0f172a; padding: 12px 16px; border-radius: 6px; border: 1px solid #334155;">
+        <div>
+          <strong style="color: #93c5fd;">Mock Interview Session #${session.sessionId}</strong> • <span style="font-size: 12px; color: #cbd5e1;">${session.targetRole || 'Software Engineer'}</span>
+        </div>
+        <div>
+          <span style="font-size: 12px; color: #94a3b8;">Progress: ${session.completedQuestionNumber || 0} / ${session.totalQuestions}</span>
+        </div>
+      </div>
+
+      ${session.questionEvaluation ? `
+        <!-- Previous Question Feedback -->
+        <div style="background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 14px; border-left: 4px solid #10b981;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <strong style="color: #4ade80; font-size: 14px;">Question Feedback: ${session.questionEvaluation.overallScore}/10</strong>
+            <span style="font-size: 11px; color: #94a3b8;">Relevance: ${session.questionEvaluation.scores?.relevance} • Depth: ${session.questionEvaluation.scores?.correctness} • Clarity: ${session.questionEvaluation.scores?.clarity} • Structure: ${session.questionEvaluation.scores?.structure}</span>
+          </div>
+          <div style="font-size: 12px; color: #cbd5e1; margin-top: 6px;">
+            ${(session.questionEvaluation.strengths || []).map(s => `<div style="color: #4ade80;">✅ ${s}</div>`).join('')}
+            ${(session.questionEvaluation.improvements || []).map(i => `<div style="color: #fcd34d;">💡 ${i}</div>`).join('')}
+          </div>
+          <div style="margin-top: 8px; background: #1e293b; padding: 10px; border-radius: 6px; font-size: 12px; color: #cbd5e1;">
+            <strong style="color: #38bdf8;">Model Benchmark Answer:</strong>
+            <p style="margin: 4px 0 0 0;">${session.questionEvaluation.improvedAnswer}</p>
+          </div>
+        </div>
+      ` : ''}
+
+      ${!isDone && currQ ? `
+        <!-- Current Question Prompt -->
+        <div style="background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 16px;">
+          <div style="font-size: 11px; color: #94a3b8; text-transform: uppercase; font-weight: 600;">Question ${(session.completedQuestionNumber || 0) + 1} of ${session.totalQuestions} [${currQ.category}]</div>
+          <h3 style="margin: 8px 0 12px 0; color: #f8fafc; font-size: 16px;">"${currQ.question}"</h3>
+          <div style="display: flex; gap: 6px; margin-bottom: 12px;">
+            ${(currQ.keyConcepts || []).map(c => `<span style="font-size: 10px; background: #1e293b; color: #93c5fd; padding: 2px 8px; border-radius: 4px; border: 1px solid #334155;">🔑 ${c}</span>`).join('')}
+          </div>
+
+          <textarea id="mockAnswerInput" rows="5" placeholder="Type your answer as you would explain it in an interview (explain context, mechanisms, and real project examples)..." style="width: 100%; background: #1e293b; border: 1px solid #475569; color: #f8fafc; padding: 10px; border-radius: 6px; font-size: 13px;"></textarea>
+
+          <div style="margin-top: 10px; display: flex; justify-content: flex-end; gap: 8px;">
+            <button class="btn btn-outline btn-sm" onclick="submitMockAnswerUi('Skipped by candidate.')">Skip</button>
+            <button class="btn btn-primary" onclick="submitMockAnswerUi()">Submit Answer ➡️</button>
+          </div>
+        </div>
+      ` : `
+        <!-- Completed Session Summary -->
+        <div style="background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 20px; text-align: center;">
+          <h2 style="color: #4ade80; margin-top: 0;">🎉 Session Complete! Average Score: ${session.overallScore}/10</h2>
+          <p style="font-size: 13px; color: #cbd5e1; max-width: 600px; margin: 0 auto;">${session.feedbackSummary}</p>
+          <div style="margin-top: 20px;">
+            <button class="btn btn-primary" onclick="careerIntelState.mockSession = null; switchCareerIntelTab('mock');">Start Another Practice Session</button>
+          </div>
+        </div>
+      `}
+    </div>
+  `;
+}
+
+window.startMockUiSession = async function() {
+  const type = document.getElementById('mockInterviewType')?.value || 'technical';
+  try {
+    const resp = await fetch('/api/intelligence/mock/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ interviewType: type, questionCount: 3 })
+    });
+    const result = await resp.json();
+    careerIntelState.mockSession = result.session;
+    renderCareerIntelHub();
+  } catch (err) {
+    alert('Failed to start mock session: ' + err.message);
+  }
+};
+
+window.submitMockAnswerUi = async function(overrideText = null) {
+  const text = overrideText !== null ? overrideText : document.getElementById('mockAnswerInput')?.value;
+  if (!text || text.trim().length === 0) {
+    alert('Please type an answer or click Skip.');
+    return;
+  }
+
+  try {
+    const resp = await fetch('/api/intelligence/mock/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: careerIntelState.mockSession.sessionId, answer: text })
+    });
+    const result = await resp.json();
+    careerIntelState.mockSession = {
+      ...careerIntelState.mockSession,
+      ...result.result
+    };
+    renderCareerIntelHub();
+  } catch (err) {
+    alert('Submission error: ' + err.message);
+  }
+};
+
+// ----------------------------------------------------
+// TAB 4: APPLICATION FUNNEL & REJECTIONS
+// ----------------------------------------------------
+function renderAnalyticsTabHtml() {
+  const an = careerIntelState.analytics || {};
+  const m = an.metrics || {};
+  const f = an.funnel || {};
+  const rej = careerIntelState.rejections || {};
+
+  return `
+    <div style="display: flex; flex-direction: column; gap: 16px;">
+      ${an.hasSmallSampleWarning ? `
+        <div style="background: rgba(245, 158, 11, 0.15); border: 1px solid #f59e0b; padding: 12px 16px; border-radius: 6px; font-size: 13px; color: #fbbf24;">
+          ⚠️ <strong>${an.smallSampleWarning}</strong>
+        </div>
+      ` : ''}
+
+      <!-- Funnel Metrics -->
+      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;">
+        <div style="background: #0f172a; padding: 14px; border-radius: 8px; border: 1px solid #334155; text-align: center;">
+          <div style="font-size: 24px; font-weight: 700; color: #93c5fd;">${an.totalApplications || 0}</div>
+          <div style="font-size: 11px; color: #94a3b8;">Total Applications</div>
+        </div>
+        <div style="background: #0f172a; padding: 14px; border-radius: 8px; border: 1px solid #334155; text-align: center;">
+          <div style="font-size: 24px; font-weight: 700; color: #38bdf8;">${m.responseRatePct || 0}%</div>
+          <div style="font-size: 11px; color: #94a3b8;">Response Rate</div>
+        </div>
+        <div style="background: #0f172a; padding: 14px; border-radius: 8px; border: 1px solid #334155; text-align: center;">
+          <div style="font-size: 24px; font-weight: 700; color: #4ade80;">${m.interviewConversionRatePct || 0}%</div>
+          <div style="font-size: 11px; color: #94a3b8;">Interview Conversion</div>
+        </div>
+        <div style="background: #0f172a; padding: 14px; border-radius: 8px; border: 1px solid #334155; text-align: center;">
+          <div style="font-size: 24px; font-weight: 700; color: #a855f7;">${m.averageResponseDays !== null ? m.averageResponseDays + ' days' : 'N/A'}</div>
+          <div style="font-size: 11px; color: #94a3b8;">Avg Response Latency</div>
+        </div>
+      </div>
+
+      <!-- Funnel Stages Bar -->
+      <div style="background: #0f172a; padding: 16px; border-radius: 8px; border: 1px solid #334155;">
+        <h4 style="margin: 0 0 12px 0; color: #f8fafc; font-size: 14px;">Application Funnel Progression</h4>
+        <div style="display: flex; gap: 8px; text-align: center;">
+          <div style="flex: 1; background: #1e293b; padding: 10px; border-radius: 4px;">
+            <div style="color: #94a3b8; font-size: 11px;">Interested / Draft</div>
+            <div style="font-size: 18px; font-weight: 700; color: #cbd5e1;">${(f.interested || 0) + (f.preparing || 0)}</div>
+          </div>
+          <div style="display: flex; align-items: center; color: #475569;">➔</div>
+          <div style="flex: 1; background: #1e293b; padding: 10px; border-radius: 4px;">
+            <div style="color: #94a3b8; font-size: 11px;">Submitted</div>
+            <div style="font-size: 18px; font-weight: 700; color: #38bdf8;">${f.submitted || 0}</div>
+          </div>
+          <div style="display: flex; align-items: center; color: #475569;">➔</div>
+          <div style="flex: 1; background: #1e293b; padding: 10px; border-radius: 4px;">
+            <div style="color: #94a3b8; font-size: 11px;">Assessment / Screen</div>
+            <div style="font-size: 18px; font-weight: 700; color: #f59e0b;">${f.assessment || 0}</div>
+          </div>
+          <div style="display: flex; align-items: center; color: #475569;">➔</div>
+          <div style="flex: 1; background: #1e293b; padding: 10px; border-radius: 4px;">
+            <div style="color: #94a3b8; font-size: 11px;">Interview</div>
+            <div style="font-size: 18px; font-weight: 700; color: #10b981;">${f.interview || 0}</div>
+          </div>
+          <div style="display: flex; align-items: center; color: #475569;">➔</div>
+          <div style="flex: 1; background: #1e293b; padding: 10px; border-radius: 4px;">
+            <div style="color: #94a3b8; font-size: 11px;">Offer</div>
+            <div style="font-size: 18px; font-weight: 700; color: #4ade80;">${f.offer || 0}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Rejection Breakdown & Next Actions -->
+      <div style="background: #0f172a; padding: 16px; border-radius: 8px; border: 1px solid #334155;">
+        <h4 style="margin: 0 0 8px 0; color: #f8fafc; font-size: 14px;">Rejection Pattern Intelligence (Strict Known vs Inferred)</h4>
+        <p style="font-size: 12px; color: #94a3b8; margin: 0 0 12px 0;">CareerOS never guesses company motives: explicit recruiter reasons are clearly separated from JD criteria mismatch hypotheses.</p>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+          <div style="background: #1e293b; padding: 12px; border-radius: 6px;">
+            <strong style="font-size: 13px; color: #f87171;">Explicit Recruiter Reasons (${rej.knownRejectionsCount || 0})</strong>
+            ${(rej.knownRejections || []).length > 0 ? (rej.knownRejections || []).map(r => `
+              <div style="font-size: 12px; color: #cbd5e1; margin-top: 6px; padding-left: 8px; border-left: 2px solid #ef4444;">
+                <strong>${r.company}:</strong> "${r.reasonText}"
+              </div>
+            `).join('') : '<div style="font-size: 12px; color: #94a3b8; margin-top: 6px;">No explicit rejection messages recorded yet.</div>'}
+          </div>
+
+          <div style="background: #1e293b; padding: 12px; border-radius: 6px;">
+            <strong style="font-size: 13px; color: #f59e0b;">Actionable Recommendations</strong>
+            <ul style="margin: 6px 0 0 0; padding-left: 18px; font-size: 12px; color: #cbd5e1; line-height: 1.6;">
+              ${(rej.actionRecommendations || []).map(a => `<li>${a}</li>`).join('')}
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// ----------------------------------------------------
+// TAB 5: SALARY & OFFER CALCULATOR
+// ----------------------------------------------------
+function renderSalaryTabHtml() {
+  const calc = careerIntelState.salaryCalc || {};
+  const m = calc.monthlyBreakdown || {};
+  const a = calc.annualBreakdown || {};
+  const c = calc.costOfLiving || {};
+
+  return `
+    <div style="display: flex; flex-direction: column; gap: 16px;">
+      <!-- Input Controls -->
+      <div style="background: #0f172a; padding: 16px; border-radius: 8px; border: 1px solid #334155;">
+        <h4 style="margin: 0 0 12px 0; color: #f8fafc; font-size: 14px;">Indian Take-Home Pay & Net Savings Calculator</h4>
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;">
+          <div>
+            <label style="font-size: 11px; color: #94a3b8; font-weight: 600;">Annual CTC (₹):</label>
+            <input type="number" id="calcCtcInput" value="${calc.ctcAnnual || 500000}" step="25000" style="width: 100%; background: #1e293b; border: 1px solid #475569; color: #f8fafc; padding: 6px 10px; border-radius: 4px; font-size: 13px;" />
+          </div>
+          <div>
+            <label style="font-size: 11px; color: #94a3b8; font-weight: 600;">Location:</label>
+            <select id="calcLocationInput" style="width: 100%; background: #1e293b; border: 1px solid #475569; color: #f8fafc; padding: 6px 10px; border-radius: 4px; font-size: 13px;">
+              <option value="Bengaluru" selected>Bengaluru, KA</option>
+              <option value="Remote">Remote (India)</option>
+              <option value="Hyderabad">Hyderabad, TS</option>
+              <option value="Pune">Pune, MH</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size: 11px; color: #94a3b8; font-weight: 600;">Work Mode:</label>
+            <select id="calcWorkModeInput" style="width: 100%; background: #1e293b; border: 1px solid #475569; color: #f8fafc; padding: 6px 10px; border-radius: 4px; font-size: 13px;">
+              <option value="onsite" selected>On-site</option>
+              <option value="hybrid">Hybrid</option>
+              <option value="remote">Fully Remote</option>
+            </select>
+          </div>
+          <div style="display: flex; align-items: flex-end;">
+            <button class="btn btn-primary" style="width: 100%;" onclick="executeSalaryCalculation()">Calculate ⚡</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Financial Metrics Grid -->
+      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
+        <div style="background: #0f172a; padding: 14px; border-radius: 8px; border: 1px solid #334155; border-left: 4px solid #38bdf8;">
+          <div style="font-size: 12px; color: #94a3b8;">Estimated Monthly Gross</div>
+          <div style="font-size: 22px; font-weight: 700; color: #38bdf8;">₹${(m.grossPay || 0).toLocaleString('en-IN')}</div>
+          <div style="font-size: 11px; color: #64748b; margin-top: 4px;">Based on ₹${(calc.fixedPayAnnual || 0).toLocaleString('en-IN')} Fixed CTC</div>
+        </div>
+        <div style="background: #0f172a; padding: 14px; border-radius: 8px; border: 1px solid #334155; border-left: 4px solid #4ade80;">
+          <div style="font-size: 12px; color: #94a3b8;">Estimated Net Monthly In-Hand</div>
+          <div style="font-size: 22px; font-weight: 700; color: #4ade80;">₹${(m.netInHand || 0).toLocaleString('en-IN')}</div>
+          <div style="font-size: 11px; color: #64748b; margin-top: 4px;">After EPF, PT & Income Tax TDS</div>
+        </div>
+        <div style="background: #0f172a; padding: 14px; border-radius: 8px; border: 1px solid #334155; border-left: 4px solid #f59e0b;">
+          <div style="font-size: 12px; color: #94a3b8;">Est. Net Monthly Savings</div>
+          <div style="font-size: 22px; font-weight: 700; color: #fbbf24;">₹${(c.estimatedNetMonthlySavings || 0).toLocaleString('en-IN')}</div>
+          <div style="font-size: 11px; color: #64748b; margin-top: 4px;">After ₹${(c.estimatedMonthlyExpense || 0).toLocaleString('en-IN')}/mo Living Expenses</div>
+        </div>
+      </div>
+
+      <!-- Deductions Breakdown -->
+      <div style="background: #0f172a; padding: 16px; border-radius: 8px; border: 1px solid #334155;">
+        <h4 style="margin: 0 0 10px 0; color: #f8fafc; font-size: 14px;">Monthly Deductions Itemization</h4>
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; font-size: 12px;">
+          <div style="background: #1e293b; padding: 10px; border-radius: 4px;">
+            <div style="color: #94a3b8;">Employee PF (EPF):</div>
+            <strong style="color: #f87171;">- ₹${(m.epfDeduction || 0).toLocaleString('en-IN')}</strong>
+          </div>
+          <div style="background: #1e293b; padding: 10px; border-radius: 4px;">
+            <div style="color: #94a3b8;">Professional Tax (PT):</div>
+            <strong style="color: #f87171;">- ₹${(m.professionalTax || 0).toLocaleString('en-IN')}</strong>
+          </div>
+          <div style="background: #1e293b; padding: 10px; border-radius: 4px;">
+            <div style="color: #94a3b8;">Income Tax (TDS):</div>
+            <strong style="color: #f87171;">- ₹${(m.incomeTaxTds || 0).toLocaleString('en-IN')}</strong>
+          </div>
+          <div style="background: #1e293b; padding: 10px; border-radius: 4px;">
+            <div style="color: #94a3b8;">Total Monthly Deductions:</div>
+            <strong style="color: #f87171;">- ₹${(m.totalDeductions || 0).toLocaleString('en-IN')}</strong>
+          </div>
+        </div>
+
+        <div style="margin-top: 14px; font-size: 11px; color: #94a3b8; line-height: 1.6;">
+          <strong>Transparent Assumptions:</strong>
+          ${(calc.assumptions || []).map(a => `<div>• ${a}</div>`).join('')}
+          <div style="margin-top: 6px; color: #64748b;">${calc.disclaimer}</div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+window.executeSalaryCalculation = async function() {
+  const ctc = document.getElementById('calcCtcInput')?.value || 500000;
+  const loc = document.getElementById('calcLocationInput')?.value || 'Bengaluru';
+  const mode = document.getElementById('calcWorkModeInput')?.value || 'onsite';
+
+  try {
+    const res = await fetch('/api/intelligence/salary/calculate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ctcAnnual: ctc, location: loc, workMode: mode })
+    }).then(r => r.json());
+
+    careerIntelState.salaryCalc = res.calculation;
+    renderCareerIntelHub();
+  } catch (err) {
+    alert('Calculation error: ' + err.message);
+  }
+};
+
+// ==========================================
+// PHASE 6: AUTOMATION & LOCAL BACKUP HUB UI
+// ==========================================
+
+let automationState = {
+  status: null,
+  backups: [],
+  activeTab: 'engine',
+  integrityStatus: null
+};
+
+async function openAutomationBackupModal() {
+  const modal = document.getElementById('automationBackupModal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  await loadAndRenderAutomationModal();
+}
+
+async function loadAndRenderAutomationModal() {
+  const container = document.getElementById('automationBackupModalBody');
+  if (!container) return;
+
+  container.innerHTML = '<div style="padding: 30px; text-align: center; color: #94a3b8;">Loading automation status & backups...</div>';
+
+  try {
+    const [statusRes, backupsRes] = await Promise.all([
+      fetch('/api/automation/status').then(r => r.json()),
+      fetch('/api/backup/list').then(r => r.json())
+    ]);
+
+    automationState.status = statusRes;
+    automationState.backups = backupsRes.backups || [];
+    renderAutomationModal();
+  } catch (err) {
+    container.innerHTML = `<div style="padding: 20px; color: #f87171;">Failed to load automation data: ${err.message}</div>`;
+  }
+}
+
+function renderAutomationModal() {
+  const container = document.getElementById('automationBackupModalBody');
+  if (!container || !automationState.status) return;
+
+  const { isEnginePaused, tasks = [], recentRuns = [], runningLocks = [] } = automationState.status;
+  const activeCount = tasks.filter(t => t.is_enabled).length;
+
+  container.innerHTML = `
+    <!-- Top System Overview Cards -->
+    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 20px;">
+      <div style="background: #1e293b; padding: 14px; border-radius: 8px; border: 1px solid #334155;">
+        <div style="color: #94a3b8; font-size: 11px; text-transform: uppercase;">Master Engine State</div>
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 6px;">
+          <span style="font-size: 16px; font-weight: 700; color: ${isEnginePaused ? '#f87171' : '#34d399'};">
+            ${isEnginePaused ? '⏸️ PAUSED' : '⚡ ACTIVE'}
+          </span>
+          <button class="btn btn-sm ${isEnginePaused ? 'btn-primary' : 'btn-outline'}" 
+                  onclick="toggleMasterEngine(${!isEnginePaused})">
+            ${isEnginePaused ? 'Resume Engine' : 'Pause All'}
+          </button>
+        </div>
+      </div>
+
+      <div style="background: #1e293b; padding: 14px; border-radius: 8px; border: 1px solid #334155;">
+        <div style="color: #94a3b8; font-size: 11px; text-transform: uppercase;">Scheduled Tasks</div>
+        <div style="font-size: 20px; font-weight: 700; color: #f8fafc; margin-top: 4px;">
+          ${activeCount} <span style="font-size: 13px; color: #94a3b8; font-weight: 400;">/ ${tasks.length} Enabled</span>
+        </div>
+        <div style="font-size: 11px; color: #38bdf8; margin-top: 2px;">
+          ${runningLocks.length > 0 ? `Running: ${runningLocks.join(', ')}` : 'Idle / Waiting next tick'}
+        </div>
+      </div>
+
+      <div style="background: #1e293b; padding: 14px; border-radius: 8px; border: 1px solid #334155;">
+        <div style="color: #94a3b8; font-size: 11px; text-transform: uppercase;">Local Backups Vault</div>
+        <div style="font-size: 20px; font-weight: 700; color: #a78bfa; margin-top: 4px;">
+          ${automationState.backups.length} <span style="font-size: 13px; color: #94a3b8; font-weight: 400;">snapshots</span>
+        </div>
+        <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">
+          Directory: <code>data/backups/</code>
+        </div>
+      </div>
+
+      <div style="background: #1e293b; padding: 14px; border-radius: 8px; border: 1px solid #334155;">
+        <div style="color: #94a3b8; font-size: 11px; text-transform: uppercase;">Production Host Profile</div>
+        <div style="font-size: 13px; font-weight: 600; color: #fbbf24; margin-top: 4px;">
+          💻 8GB RAM Laptop Ready
+        </div>
+        <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">
+          SQLite WAL • 127.0.0.1 • Low RSS
+        </div>
+      </div>
+    </div>
+
+    <!-- Sub-tab Navigation -->
+    <div style="display: flex; gap: 10px; border-bottom: 1px solid #334155; margin-bottom: 20px;">
+      <button class="filter-tab ${automationState.activeTab === 'engine' ? 'active' : ''}" 
+              onclick="setAutomationTab('engine')">⚙️ Configurable Tasks (${tasks.length})</button>
+      <button class="filter-tab ${automationState.activeTab === 'backups' ? 'active' : ''}" 
+              onclick="setAutomationTab('backups')">💾 Backups & Safety</button>
+      <button class="filter-tab ${automationState.activeTab === 'logs' ? 'active' : ''}" 
+              onclick="setAutomationTab('logs')">📜 Run Telemetry (${recentRuns.length})</button>
+    </div>
+
+    <!-- Active Tab Body -->
+    <div id="automationTabContent">
+      ${renderAutomationTabContent()}
+    </div>
+  `;
+}
+
+function setAutomationTab(tab) {
+  automationState.activeTab = tab;
+  renderAutomationModal();
+}
+
+function renderAutomationTabContent() {
+  const { tasks = [], recentRuns = [] } = automationState.status;
+
+  if (automationState.activeTab === 'engine') {
+    return `
+      <div style="display: flex; flex-direction: column; gap: 14px;">
+        ${tasks.map(t => {
+          const isFailing = t.failure_count > 0;
+          const statusColor = t.last_status === 'SUCCESS' ? '#34d399' : (isFailing ? '#f87171' : '#94a3b8');
+          return `
+            <div style="background: #0f172a; padding: 16px; border-radius: 8px; border: 1px solid ${isFailing ? '#ef4444' : '#334155'}; display: flex; justify-content: space-between; align-items: center;">
+              <div style="flex: 1; margin-right: 20px;">
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px;">
+                  <strong style="color: #f8fafc; font-size: 15px;">${t.task_name}</strong>
+                  <span style="background: ${t.is_enabled ? '#065f46' : '#374151'}; color: ${t.is_enabled ? '#6ee7b7' : '#9ca3af'}; font-size: 11px; padding: 2px 8px; border-radius: 12px;">
+                    ${t.is_enabled ? 'ENABLED' : 'DISABLED'}
+                  </span>
+                  <span style="background: #1e293b; color: #94a3b8; font-size: 11px; padding: 2px 8px; border-radius: 12px;">
+                    Every ${t.interval_minutes} mins
+                  </span>
+                  ${isFailing ? `<span style="background: #7f1d1d; color: #fca5a5; font-size: 11px; padding: 2px 8px; border-radius: 12px;">⚠️ ${t.failure_count} Backoff Failures</span>` : ''}
+                </div>
+                <div style="color: #94a3b8; font-size: 12px; margin-bottom: 8px;">${t.description || 'Configurable background routine'}</div>
+                <div style="display: flex; gap: 18px; font-size: 11px; color: #64748b;">
+                  <div>Last Run: <span style="color: #cbd5e1;">${t.last_run_at ? new Date(t.last_run_at).toLocaleString() : 'Never'}</span></div>
+                  <div>Status: <strong style="color: ${statusColor};">${t.last_status || 'IDLE'}</strong></div>
+                  <div>Next Scheduled: <span style="color: #cbd5e1;">${t.next_run_at ? new Date(t.next_run_at).toLocaleTimeString() : 'Pending'}</span></div>
+                </div>
+                ${t.last_error ? `<div style="margin-top: 6px; font-size: 11px; color: #f87171; background: #450a0a; padding: 4px 8px; border-radius: 4px;">Error: ${t.last_error}</div>` : ''}
+              </div>
+
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <button class="btn btn-outline btn-sm" onclick="triggerTaskRun('${t.task_key}')">▶ Run Now</button>
+                <button class="btn btn-outline btn-sm" onclick="toggleTask('${t.task_key}', ${t.is_enabled ? 1 : 0})">
+                  ${t.is_enabled ? 'Disable' : 'Enable'}
+                </button>
+                <button class="btn btn-outline btn-sm" onclick="updateTaskFreq('${t.task_key}', ${t.interval_minutes})">⏱️ Interval</button>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+  }
+
+  if (automationState.activeTab === 'backups') {
+    return `
+      <div>
+        <!-- Backup Action Bar -->
+        <div style="background: #1e293b; padding: 16px; border-radius: 8px; border: 1px solid #334155; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <h4 style="margin: 0 0 4px 0; color: #f8fafc; font-size: 14px;">Local-First Data Protection & SQLite Safety</h4>
+            <p style="margin: 0; color: #94a3b8; font-size: 12px;">Create point-in-time database snapshots, verify physical integrity, or export full JSON career archives.</p>
+          </div>
+          <div style="display: flex; gap: 10px;">
+            <button class="btn btn-outline btn-sm" onclick="checkDatabaseIntegrity()">🔍 Check Integrity</button>
+            <button class="btn btn-outline btn-sm" onclick="exportFullArchive()">📦 Export JSON Archive</button>
+            <button class="btn btn-primary btn-sm" onclick="createManualBackup()">⚡ Create Backup</button>
+          </div>
+        </div>
+
+        ${automationState.integrityStatus ? `
+          <div style="background: #0f172a; padding: 12px 16px; border-radius: 6px; border: 1px solid #38bdf8; margin-bottom: 20px; font-size: 12px; color: #e2e8f0;">
+            <strong style="color: #38bdf8;">Integrity Status:</strong> ${automationState.integrityStatus.ok ? '✅ ' + automationState.integrityStatus.message : '❌ ' + automationState.integrityStatus.message}
+            <span style="color: #94a3b8; margin-left: 10px;">Checked at ${new Date(automationState.integrityStatus.timestamp).toLocaleTimeString()}</span>
+          </div>
+        ` : ''}
+
+        <!-- Backups List -->
+        <div style="background: #0f172a; border-radius: 8px; border: 1px solid #334155; overflow: hidden;">
+          <div style="padding: 12px 16px; background: #1e293b; border-bottom: 1px solid #334155; font-size: 12px; font-weight: 600; color: #cbd5e1; display: grid; grid-template-columns: 2fr 1fr 1fr 1fr;">
+            <div>Snapshot File</div>
+            <div>Label</div>
+            <div>File Size</div>
+            <div style="text-align: right;">Recovery</div>
+          </div>
+          ${automationState.backups.length === 0 ? `
+            <div style="padding: 30px; text-align: center; color: #64748b; font-size: 13px;">No backups found in <code>data/backups/</code>. Click "Create Backup" above.</div>
+          ` : automationState.backups.map(b => `
+            <div style="padding: 12px 16px; border-bottom: 1px solid #1e293b; font-size: 12px; color: #cbd5e1; display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; align-items: center;">
+              <div>
+                <strong style="color: #f8fafc;">${b.filename}</strong>
+                <div style="color: #64748b; font-size: 11px;">${new Date(b.created_at).toLocaleString()}</div>
+              </div>
+              <div><span style="background: #1e293b; padding: 2px 8px; border-radius: 4px; color: #a78bfa;">${b.label || 'manual'}</span></div>
+              <div style="color: #94a3b8;">${(b.size_bytes / 1024).toFixed(1)} KB</div>
+              <div style="text-align: right;">
+                <button class="btn btn-outline btn-sm" style="color: #f87171; border-color: #ef4444;" onclick="promptRestore('${b.path.replace(/\\/g, '\\\\')}')">
+                  🔄 Restore
+                </button>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  if (automationState.activeTab === 'logs') {
+    return `
+      <div style="background: #0f172a; border-radius: 8px; border: 1px solid #334155; overflow: hidden;">
+        <div style="padding: 12px 16px; background: #1e293b; border-bottom: 1px solid #334155; font-size: 12px; font-weight: 600; color: #cbd5e1; display: grid; grid-template-columns: 1.5fr 1fr 1fr 1fr 2fr;">
+          <div>Task Key</div>
+          <div>Status</div>
+          <div>Duration</div>
+          <div>Timestamp</div>
+          <div>Details</div>
+        </div>
+        ${recentRuns.length === 0 ? `
+          <div style="padding: 30px; text-align: center; color: #64748b; font-size: 13px;">No background runs recorded yet.</div>
+        ` : recentRuns.map(r => {
+          const isSuccess = r.status === 'SUCCESS';
+          return `
+            <div style="padding: 10px 16px; border-bottom: 1px solid #1e293b; font-size: 12px; color: #cbd5e1; display: grid; grid-template-columns: 1.5fr 1fr 1fr 1fr 2fr; align-items: center;">
+              <div><strong style="color: #f8fafc;">${r.task_key}</strong></div>
+              <div>
+                <span style="background: ${isSuccess ? '#065f46' : '#7f1d1d'}; color: ${isSuccess ? '#6ee7b7' : '#fca5a5'}; font-size: 10px; padding: 2px 6px; border-radius: 4px;">
+                  ${r.status}
+                </span>
+              </div>
+              <div style="color: #94a3b8;">${r.duration_ms} ms</div>
+              <div style="color: #64748b; font-size: 11px;">${new Date(r.started_at).toLocaleTimeString()}</div>
+              <div style="color: ${r.error_message ? '#f87171' : '#94a3b8'}; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                ${r.error_message || (r.summary_json ? JSON.stringify(JSON.parse(r.summary_json)) : 'Completed')}
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+  }
+}
+
+window.setAutomationTab = setAutomationTab;
+
+window.triggerTaskRun = async function(taskKey) {
+  try {
+    const res = await fetch(`/api/automation/task/${taskKey}/run`, { method: 'POST' }).then(r => r.json());
+    if (res.success) {
+      alert(`Task [${taskKey}] executed successfully!`);
+      await loadAndRenderAutomationModal();
+    } else {
+      alert(`Task [${taskKey}] execution failed: ` + res.error);
+    }
+  } catch (err) {
+    alert('Task execution error: ' + err.message);
+  }
+};
+
+window.toggleTask = async function(taskKey, currentStatus) {
+  try {
+    const res = await fetch(`/api/automation/task/${taskKey}/toggle`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: !currentStatus })
+    }).then(r => r.json());
+    if (res.success) {
+      await loadAndRenderAutomationModal();
+    }
+  } catch (err) {
+    alert('Error toggling task: ' + err.message);
+  }
+};
+
+window.updateTaskFreq = async function(taskKey, currentInterval) {
+  const newInterval = prompt(`Enter new interval in minutes for [${taskKey}]:`, currentInterval);
+  if (!newInterval) return;
+  const num = parseInt(newInterval, 10);
+  if (isNaN(num) || num < 1) {
+    alert('Invalid interval. Must be at least 1 minute.');
+    return;
+  }
+  try {
+    const res = await fetch(`/api/automation/task/${taskKey}/interval`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ intervalMinutes: num })
+    }).then(r => r.json());
+    if (res.success) {
+      await loadAndRenderAutomationModal();
+    }
+  } catch (err) {
+    alert('Error updating interval: ' + err.message);
+  }
+};
+
+window.toggleMasterEngine = async function(paused) {
+  try {
+    const res = await fetch('/api/automation/master-toggle', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paused })
+    }).then(r => r.json());
+    if (res.success) {
+      await loadAndRenderAutomationModal();
+    }
+  } catch (err) {
+    alert('Error setting master pause: ' + err.message);
+  }
+};
+
+window.createManualBackup = async function() {
+  const label = prompt('Enter a label for this backup (optional):', 'manual_snapshot') || 'manual_snapshot';
+  try {
+    const res = await fetch('/api/backup/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label })
+    }).then(r => r.json());
+
+    if (res.success) {
+      alert(`Backup created successfully:\n${res.backup.filename}`);
+      await loadAndRenderAutomationModal();
+    } else {
+      alert('Backup failed: ' + res.error);
+    }
+  } catch (err) {
+    alert('Backup error: ' + err.message);
+  }
+};
+
+window.checkDatabaseIntegrity = async function() {
+  try {
+    const res = await fetch('/api/backup/integrity').then(r => r.json());
+    if (res.success) {
+      automationState.integrityStatus = res.integrity;
+      renderAutomationModal();
+    }
+  } catch (err) {
+    alert('Integrity check error: ' + err.message);
+  }
+};
+
+window.exportFullArchive = async function() {
+  try {
+    const res = await fetch('/api/backup/export-full', { method: 'POST' }).then(r => r.json());
+    if (res.success) {
+      const blob = new Blob([JSON.stringify(res.archive, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `careeros_full_archive_${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } else {
+      alert('Export failed: ' + res.error);
+    }
+  } catch (err) {
+    alert('Export error: ' + err.message);
+  }
+};
+
+window.promptRestore = async function(backupPath) {
+  const confirmText = prompt(`⚠️ CAUTION: RESTORING WILL REPLACE YOUR CURRENT DATABASE WITH THIS SNAPSHOT.\n\nType "RESTORE" to confirm:`);
+  if (confirmText !== 'RESTORE') {
+    alert('Restore cancelled. Confirmation text did not match.');
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/backup/restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ backupPath, userConfirmed: true })
+    }).then(r => r.json());
+
+    if (res.success) {
+      alert('Database restored successfully! Dashboard will now reload.');
+      window.location.reload();
+    } else {
+      alert('Restore failed: ' + res.error);
+    }
+  } catch (err) {
+    alert('Restore error: ' + err.message);
+  }
+};
+
+
 
