@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CareerOS | Personal AI Career Automation System</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="navbar">
+    <div class="brand">
+      <div class="logo-icon">🎯</div>
+      <div class="brand-text">
+        <h1>CareerOS</h1>
+        <span class="subtext">Personal AI Job Search, Matching & Application Assistant</span>
+      </div>
+    </div>
+    <div class="candidate-badge" id="candidateBadge">
+      <span class="avatar">👨‍💻</span>
+      <div class="candidate-info">
+        <strong id="candName">Abhishek N</strong>
+        <small id="candDegree">MCA 2026 • Java Full Stack • Bengaluru</small>
+      </div>
+    </div>
+    <div class="nav-actions">
+      <button class="btn btn-outline" id="viewProfileBtn" title="View Verified Candidate Profile">👤 Profile</button>
+      <button class="btn btn-outline" id="verifyLinksBtn" title="Audit links and detect ghost jobs">🔍 Audit Links</button>
+      <button class="btn btn-outline" id="exportCsvBtn" title="Export pipeline to CSV">📊 CSV</button>
+      <button class="btn btn-outline" id="exportJsonBtn" title="Export pipeline to JSON">📁 JSON</button>
+      <button class="btn btn-primary" id="scanBtn">⚡ Scan Jobs</button>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- Stat Counters -->
+    <section class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-value" id="statTotal">0</div>
+        <div class="stat-label">Total Scanned</div>
+      </div>
+      <div class="stat-card highlight">
+        <div class="stat-value text-success" id="statRecommended">0</div>
+        <div class="stat-label">Recommended Roles</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value text-warning" id="statConsider">0</div>
+        <div class="stat-label">Consider / Review</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value text-info" id="statSaved">0</div>
+        <div class="stat-label">Saved Pipeline</div>
+      </div>
+    </section>
+
+    <!-- Filters and Search Toolbar -->
+    <section class="toolbar">
+      <div class="filter-group">
+        <button class="filter-tab active" data-filter="all">All Jobs</button>
+        <button class="filter-tab" data-filter="RECOMMENDED">🌟 Recommended</button>
+        <button class="filter-tab" data-filter="CONSIDER">🔍 Consider</button>
+        <button class="filter-tab" data-filter="saved">💾 Saved</button>
+        <button class="filter-tab" data-filter="ready_to_apply">📝 Ready to Apply</button>
+        <button class="filter-tab" data-filter="applied">🚀 Applied</button>
+      </div>
+      <div class="search-box">
+        <input type="text" id="searchInput" placeholder="Search title, company, or skill..." />
+      </div>
+    </section>
+
+    <!-- Job Feed -->
+    <section class="job-list-section">
+      <div class="section-header">
+        <h2 id="jobSectionTitle">Job Opportunities</h2>
+        <span class="count-tag" id="visibleCount">0 roles</span>
+      </div>
+      <div id="loadingIndicator" class="loading hidden">
+        <div class="spinner"></div>
+        <p>Scanning job repositories across India...</p>
+      </div>
+      <div class="job-grid" id="jobGrid">
+        <!-- Cards injected via app.js -->
+      </div>
+    </section>
+  </main>
+
+  <!-- Universal Action Modal -->
+  <div class="modal hidden" id="actionModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 id="modalTitle">Document Viewer</h2>
+        <button class="close-btn" id="closeModalBtn">&times;</button>
+      </div>
+      <div class="modal-body" id="modalBody">
+        <!-- Injected dynamically -->
+      </div>
+    </div>
+  </div>
+
+  <!-- AI Resume Studio Modal -->
+  <div class="modal hidden" id="resumeStudioModal">
+    <div class="modal-content studio-modal-content">
+      <div class="modal-header studio-header">
+        <div class="studio-header-left">
+          <div class="studio-badge">✨ AI Resume Studio</div>
+          <h2 id="studioJobTitle">Software Engineer @ Company</h2>
+          <span class="studio-location" id="studioLocation">📍 Bengaluru</span>
+          <a href="#" target="_blank" id="studioJobUrl" class="studio-link">🔗 View Original JD</a>
+        </div>
+        <div class="studio-header-actions">
+          <div class="template-selector-wrap">
+            <label for="studioTemplateSelect">Template:</label>
+            <select id="studioTemplateSelect">
+              <option value="ats_professional" selected>ATS Professional (B&W)</option>
+              <option value="modern_professional">Modern Professional (Navy)</option>
+              <option value="compact_one_page">Compact One-Page</option>
+            </select>
+          </div>
+          <button class="btn btn-primary" id="studioSaveVersionBtn">💾 Save Version</button>
+          <button class="btn btn-outline" id="studioApproveBtn">✅ Approve for Apply</button>
+          <button class="close-btn" id="closeStudioBtn">&times;</button>
+        </div>
+      </div>
+
+      <div class="studio-body">
+        <!-- Left Panel: JD Requirements & ATS Scorecard -->
+        <aside class="studio-sidebar">
+          <div class="ats-score-card">
+            <div class="ats-score-header">
+              <span class="ats-score-label">ATS Decision Matrix</span>
+              <span class="ats-disclaimer-pill" title="Algorithmic compatibility estimate, not an employer ATS ranking">Internal Estimate ℹ️</span>
+            </div>
+
+            <!-- Dual Indicators: Indicator A & Indicator B -->
+            <div class="dual-indicators-box">
+              <div class="indicator-item">
+                <div class="indicator-title">Indicator A: Resume Compatibility</div>
+                <div class="ats-score-main">
+                  <div class="ats-score-number" id="resumeCompatValue">--</div>
+                  <div class="ats-score-scale">/ 100</div>
+                </div>
+                <div class="indicator-sub">Content & Skill Match</div>
+              </div>
+
+              <div class="indicator-item">
+                <div class="indicator-title">Indicator B: Eligibility Assessment</div>
+                <div id="eligibilityBadge" class="eligibility-badge eligible">Checking...</div>
+                <div class="indicator-sub" id="eligibilitySummary">Fresher / 0–1 yrs</div>
+              </div>
+            </div>
+
+            <!-- Mandatory Unmet Requirements Alert Banner -->
+            <div id="mandatoryAlertBox" class="mandatory-alert-box hidden">
+              <div class="alert-box-title">⛔ Mandatory Requirement Not Met</div>
+              <ul id="mandatoryUnmetList" class="alert-box-list"></ul>
+              <div class="alert-box-warning">Recruiter screening filters will likely reject freshers for this role.</div>
+            </div>
+
+            <!-- Overall Application Match -->
+            <div class="overall-match-row">
+              <span class="overall-match-label">Overall Match (Capped for Eligibility):</span>
+              <span class="overall-match-value" id="overallScoreValue">-- / 100</span>
+            </div>
+            <div class="ats-score-bar-bg">
+              <div class="ats-score-bar-fill" id="atsScoreBar" style="width: 0%;"></div>
+            </div>
+            <div class="ats-generation-badge" id="atsGenerationMode">Mode: Dual-Agent Deterministic Engine</div>
+          </div>
+
+          <!-- Category Scores -->
+          <div class="ats-categories-card">
+            <h4>Weighted Category Breakdown</h4>
+            <div id="atsCategoryBreakdownList" class="category-breakdown-list">
+              <!-- Dynamically rendered -->
+            </div>
+          </div>
+
+          <!-- Keywords Analysis -->
+          <div class="ats-keywords-card">
+            <h4>Keyword Match Intelligence</h4>
+            <div class="keyword-group">
+              <span class="kw-title text-success">Matched Skills:</span>
+              <div id="matchedKeywordsTags" class="tags-row"></div>
+            </div>
+            <div class="keyword-group">
+              <span class="kw-title text-danger">Missing Mandatory:</span>
+              <div id="missingMandatoryTags" class="tags-row"></div>
+            </div>
+            <div class="keyword-group">
+              <span class="kw-title text-warning">Missing Preferred:</span>
+              <div id="missingPreferredTags" class="tags-row"></div>
+            </div>
+            <div class="keyword-group">
+              <span class="kw-title text-info">In Profile but Omitted:</span>
+              <div id="omittedProfileTags" class="tags-row"></div>
+            </div>
+          </div>
+
+          <!-- Actionable Suggestions -->
+          <div class="ats-suggestions-card">
+            <h4>ATS Improvement Suggestions</h4>
+            <ul id="atsSuggestionsList" class="suggestions-list">
+              <!-- Suggestions dynamically injected -->
+            </ul>
+          </div>
+        </aside>
+
+        <!-- Center Panel: Interactive Editor & Changes Diff -->
+        <section class="studio-center">
+          <div class="studio-tab-bar">
+            <button class="studio-tab active" data-tab="editor">✏️ Resume Editor</button>
+            <button class="studio-tab" data-tab="diff">🔄 Before & After Changes</button>
+            <button class="studio-tab" data-tab="jd">📄 Original JD</button>
+            <div class="studio-tab-actions">
+              <button class="btn btn-outline btn-sm" id="recalculateScoreBtn">⚡ Recalculate ATS Score</button>
+            </div>
+          </div>
+
+          <div class="studio-tab-content" id="tabEditor">
+            <div class="editor-section">
+              <label>Professional Summary (Tailored Hook):</label>
+              <textarea id="editSummary" rows="4"></textarea>
+            </div>
+
+            <div class="editor-section">
+              <label>Programming Languages:</label>
+              <input type="text" id="editLanguages" />
+            </div>
+
+            <div class="editor-section">
+              <label>Backend & Java:</label>
+              <input type="text" id="editBackend" />
+            </div>
+
+            <div class="editor-section">
+              <label>Frontend & Web:</label>
+              <input type="text" id="editFrontend" />
+            </div>
+
+            <div class="editor-section">
+              <label>Databases:</label>
+              <input type="text" id="editDatabases" />
+            </div>
+
+            <div class="editor-section">
+              <label>Featured Projects & Key Highlights:</label>
+              <div id="editProjectsContainer"></div>
+            </div>
+          </div>
+
+          <div class="studio-tab-content hidden" id="tabDiff">
+            <div id="diffContainer" class="diff-container">
+              <!-- Injected dynamically -->
+            </div>
+          </div>
+
+          <div class="studio-tab-content hidden" id="tabJd">
+            <div class="jd-viewer-container">
+              <div id="jdExtractedMeta" class="jd-extracted-meta"></div>
+              <pre id="jdFullText" class="jd-full-text"></pre>
+            </div>
+          </div>
+        </section>
+
+        <!-- Right Panel: Live Resume Preview & Version Vault -->
+        <aside class="studio-preview-pane">
+          <div class="preview-toolbar">
+            <span class="preview-title">Live ATS Paper Preview</span>
+            <div class="preview-actions">
+              <button class="btn btn-primary btn-sm" id="downloadPdfBtn">📥 PDF</button>
+              <button class="btn btn-outline btn-sm" id="downloadDocxBtn">📄 DOCX</button>
+            </div>
+          </div>
+
+          <div class="preview-paper-container">
+            <iframe id="resumePreviewIframe" class="resume-preview-frame"></iframe>
+          </div>
+
+          <!-- Version Vault -->
+          <div class="version-vault-pane">
+            <div class="version-vault-header">
+              <h4>Saved Versions Vault</h4>
+              <span id="versionCountTag" class="version-count">0 versions</span>
+            </div>
+            <div id="versionList" class="version-list">
+              <!-- Version items dynamically injected -->
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

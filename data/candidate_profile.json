@@ -1,0 +1,242 @@
+{
+  "personal": {
+    "fullName": "Abhishek N",
+    "location": "Bangalore, Karnataka, India",
+    "phone": "+91-XXXXXXXXXX",
+    "email": "candidate@example.com",
+    "linkedIn": "https://linkedin.com/in/abhishekn27077",
+    "gitHub": "https://github.com/abhishekn27077",
+    "portfolio": "https://nearvia.app"
+  },
+  "summary": "Java Full Stack Developer with hands-on experience building full-stack applications using Java, Spring Boot, React.js and JavaScript, with strong skills in REST API development and SQL and NoSQL databases. Built AI-enabled and IoT projects, including NearVia, a location-based job marketplace.",
+  "status": {
+    "graduationYear": 2026,
+    "currentDegree": "MCA (Master of Computer Applications)",
+    "targetLevel": "Fresher / Entry Level / Junior (0-1 years)",
+    "noticePeriod": "Available / 2026 Graduate",
+    "workAuthorization": "Citizen of India",
+    "preferredLocations": [
+      "Bangalore",
+      "Bengaluru",
+      "Remote (India)",
+      "Hyderabad",
+      "Pune"
+    ]
+  },
+  "education": [
+    {
+      "degree": "Master of Computer Applications (MCA)",
+      "institution": "AIMS Institutes, Bangalore",
+      "period": "2024 – 2026",
+      "status": "Completed Oct 2026",
+      "highlights": "Best AI Innovation medal recipient at graduation"
+    },
+    {
+      "degree": "Bachelor of Computer Applications (BCA)",
+      "institution": "SSA Government First Grade College, Ballari",
+      "period": "2021 – 2024",
+      "status": "Completed"
+    }
+  ],
+  "experience": [
+    {
+      "role": "Advanced Java Full Stack Development Intern",
+      "company": "Anudip Foundation, Bangalore",
+      "period": "Oct 2026",
+      "type": "Internship / Training",
+      "bullets": [
+        "Developed Java applications applying OOP, JDBC, Collections Framework and Multithreading.",
+        "Built full-stack web applications using Spring Boot, React.js, MySQL and REST APIs."
+      ]
+    },
+    {
+      "role": "Digital Media Intern",
+      "company": "Association of Women Entrepreneurs of Karnataka (AWAKE), Bangalore",
+      "period": "Feb 2026",
+      "type": "Short-term Internship (30 hours)",
+      "bullets": [
+        "Created digital and social media content to support the organisation's branding and community outreach.",
+        "Assisted in planning and coordinating video shoots for awareness campaigns during a 30-hour internship."
+      ]
+    }
+  ],
+  "projects": [
+    {
+      "name": "NearVia – Hyperlocal Marketplace for Daily-Wage Work",
+      "subtitle": "MCA Final Year Project",
+      "techStack": [
+        "React",
+        "TypeScript",
+        "Node.js",
+        "Express.js",
+        "PostgreSQL",
+        "PostGIS",
+        "Supabase"
+      ],
+      "url": "https://nearvia.app",
+      "github": "https://github.com/abhishekn27077/NearVia",
+      "bullets": [
+        "Built a hyperlocal job marketplace connecting daily-wage workers with nearby jobs within a 5 km radius, with separate worker, provider, agent and admin workflows.",
+        "Implemented PostGIS location-based job discovery and a matching engine based on skills, availability and distance; used PostgreSQL row-level locking to prevent double-booking.",
+        "Secured the platform with role-based access control, Zod validation and rate limiting; added GPS and PIN-based attendance verification, English, Hindi and Kannada support, and automated testing."
+      ]
+    },
+    {
+      "name": "FinSight – AI Expense Tracker and Financial Health Predictor",
+      "techStack": [
+        "React.js",
+        "Node.js",
+        "Express.js",
+        "MongoDB Atlas",
+        "Python",
+        "FastAPI"
+      ],
+      "bullets": [
+        "Built a full-stack personal finance platform with secure REST APIs for authentication and transaction management, CSV and PDF bank statement parsing, and automated transaction categorisation.",
+        "Developed a Python FastAPI backend service for financial-health prediction and spending analysis, with interactive dashboards; deployed on Vercel, Render and MongoDB Atlas."
+      ]
+    },
+    {
+      "name": "Employee Leave Management System",
+      "techStack": [
+        "Java",
+        "Spring Boot",
+        "Hibernate/JPA",
+        "React",
+        "MySQL"
+      ],
+      "bullets": [
+        "Developed a full-stack leave management application for handling employee leave requests, using Spring Boot and Hibernate/JPA on the backend, React on the frontend and MySQL for data storage."
+      ]
+    },
+    {
+      "name": "Smart Rover – AI Waste Detection Vehicle",
+      "techStack": [
+        "ESP32-CAM",
+        "Python",
+        "OpenCV",
+        "Telegram Bot API"
+      ],
+      "bullets": [
+        "Built an autonomous vehicle that identifies waste in real time using OpenCV computer vision on ESP32-CAM video.",
+        "Integrated Telegram notifications for remote monitoring; awarded Second Prize at the Science Exhibition."
+      ]
+    },
+    {
+      "name": "Aquaponics Monitoring System",
+      "techStack": [
+        "ESP32",
+        "IoT Sensors",
+        "Telegram Bot API"
+      ],
+      "bullets": [
+        "Built an IoT system using ESP32 and sensors to monitor water quality, temperature and humidity in real time.",
+        "Automated Telegram alerts for abnormal readings, reducing manual monitoring in sustainable aquaponics farming."
+      ]
+    },
+    {
+      "name": "Drowsiness Detection System",
+      "techStack": [
+        "Python",
+        "OpenCV",
+        "Computer Vision"
+      ],
+      "bullets": [
+        "Built a real-time driver drowsiness and fatigue monitoring system utilizing OpenCV computer vision and eye aspect ratio analysis with alert triggers."
+      ]
+    },
+    {
+      "name": "Online Voting System",
+      "techStack": [
+        "PHP",
+        "MySQL",
+        "HTML5",
+        "CSS3",
+        "JavaScript"
+      ],
+      "bullets": [
+        "Developed a secure web-based online voting portal with voter authentication, candidate management, and real-time ballot tallying using PHP and MySQL."
+      ]
+    }
+  ],
+  "skills": {
+    "languages": [
+      "Java",
+      "Python",
+      "JavaScript",
+      "TypeScript",
+      "SQL",
+      "PHP"
+    ],
+    "backend": [
+      "Core Java",
+      "OOP",
+      "JDBC",
+      "Collections Framework",
+      "Multithreading",
+      "Spring Boot",
+      "Hibernate/JPA",
+      "Node.js",
+      "Express.js",
+      "FastAPI",
+      "REST APIs"
+    ],
+    "frontend": [
+      "React.js",
+      "HTML5",
+      "CSS3",
+      "Bootstrap",
+      "Tailwind CSS"
+    ],
+    "databases": [
+      "MySQL",
+      "PostgreSQL",
+      "MongoDB",
+      "PostGIS"
+    ],
+    "ai_ml": [
+      "OpenCV",
+      "Scikit-learn",
+      "Pandas",
+      "NumPy"
+    ],
+    "iot": [
+      "ESP32",
+      "ESP32-CAM",
+      "Sensors",
+      "Telegram Bot API"
+    ],
+    "tools": [
+      "Git",
+      "GitHub",
+      "Postman",
+      "VS Code",
+      "IntelliJ IDEA",
+      "Eclipse",
+      "Vercel",
+      "Render"
+    ]
+  },
+  "certifications": [
+    {
+      "title": "Career Essentials in Generative AI",
+      "issuer": "Microsoft & LinkedIn Learning"
+    },
+    {
+      "title": "Python for Data Science and AI Development",
+      "issuer": "Coursera"
+    },
+    {
+      "title": "Java Complete Course",
+      "issuer": "Udemy"
+    },
+    {
+      "title": "Python Programming: From Basics to Advanced",
+      "issuer": "Udemy"
+    }
+  ],
+  "achievements": [
+    "Received the Best AI Innovation medal at the AIMS Institutes MCA Graduation Ceremony, 31 October 2026.",
+    "Won Second Prize twice for the Smart Aquaponics Monitoring System at the College Science Day Project Exhibition and the VITM Engineering Fair 2026, Bangalore."
+  ]
+}

@@ -1,0 +1,20 @@
+[
+  {
+    "name": "SmartRecruiters Direct Feed",
+    "portal": "smartrecruiters",
+    "companyToken": "Gloify",
+    "enabled": true
+  },
+  {
+    "name": "Taurus Hard Soft Solutions",
+    "portal": "smartrecruiters",
+    "companyToken": "TaurusHardSoftSolutionsPvtLtd",
+    "enabled": true
+  },
+  {
+    "name": "Cutshort Bengaluru Feed",
+    "portal": "cutshort",
+    "url": "https://cutshort.io/jobs/bengaluru-jobs",
+    "enabled": true
+  }
+]
