@@ -45,9 +45,13 @@ export function evaluateJobFit(job) {
   } else if (hasFresherKeyword || (expMin !== null && expMin <= 1)) {
     seniorityScore = 30; // Maximum fresher fit
     fresherEligible = true;
+  } else if (!titleLower.trim()) {
+    // Missing title or blank job record cannot claim fresher eligibility or baseline seniority
+    seniorityScore = 0;
+    fresherEligible = false;
   } else {
     // Tolerable 0-2 years range
-    seniorityScore = 22;
+    seniorityScore = 20;
     fresherEligible = true;
   }
 
@@ -90,7 +94,7 @@ export function evaluateJobFit(job) {
     }
   }
 
-  let skillsScore = 15; // default if minimal specific tech mentioned
+  let skillsScore = 0; // 0 points if no technical skills or software engineering terms exist
   if (totalPossibleWeight > 0) {
     skillsScore = Math.round((rawSkillScore / totalPossibleWeight) * 30);
   } else if (/\bsoftware\s*(development|engineering|developer)\b/i.test(textToScan)) {
@@ -99,10 +103,10 @@ export function evaluateJobFit(job) {
   }
 
   // 3. Location Fit (Weight: 20)
-  let locationScore = 10;
+  let locationScore = 0;
   const isBangalore = /\b(bengaluru|bangalore|karnataka)\b/i.test(locationLower);
   const isRemote = /\b(remote|work\s*from\s*home|wfh)\b/i.test(locationLower) || /\b(remote|work\s*from\s*home)\b/i.test(textToScan);
-  const isOtherIndiaHub = /\b(hyderabad|pune|chennai|delhi|noida|gurugram|mumbai|india)\b/i.test(locationLower);
+  const isOtherIndiaHub = /\b(hyderabad|pune|chennai|delhi|noida|gurugram|mumbai)\b/i.test(locationLower);
 
   if (isBangalore) {
     locationScore = 20; // Top location
@@ -111,13 +115,13 @@ export function evaluateJobFit(job) {
   } else if (isOtherIndiaHub) {
     locationScore = 14;
   } else if (locationLower.includes('india')) {
-    locationScore = 12;
-  } else {
+    locationScore = 10;
+  } else if (locationLower.length > 0) {
     locationScore = 5;
   }
 
   // 4. Role Relevance (Weight: 20)
-  let roleScore = 10;
+  let roleScore = 0;
   if (/\bjava\s*(full\s*stack|developer|software)\b/i.test(titleLower)) {
     roleScore = 20;
   } else if (/\b(spring\s*boot|backend\s*developer)\b/i.test(titleLower)) {
@@ -130,6 +134,8 @@ export function evaluateJobFit(job) {
     roleScore = 16;
   } else if (/\b(ai\s*engineer|ml\s*engineer|junior\s*developer)\b/i.test(titleLower)) {
     roleScore = 15;
+  } else if (/\b(developer|engineer|programmer)\b/i.test(titleLower)) {
+    roleScore = 10;
   }
 
   // Calculate composite score
