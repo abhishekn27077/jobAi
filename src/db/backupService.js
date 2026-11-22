@@ -80,21 +80,45 @@ export function listBackups(backupDir = BACKUPS_DIR) {
 
 /**
  * Restores database from a validated backup file.
- * STRICT SAFETY RULE: Requires explicit confirmation.
+ * STRICT SAFETY RULE: Requires explicit confirmation and path validation.
  */
-export function restoreDatabase(backupPath, { userConfirmed = false } = {}) {
+export function restoreDatabase(backupPathOrOptions, options = {}) {
+  let targetPath = backupPathOrOptions;
+  let userConfirmed = options.userConfirmed || false;
+
+  if (typeof backupPathOrOptions === 'object' && backupPathOrOptions !== null) {
+    targetPath = backupPathOrOptions.backupPath || backupPathOrOptions.path;
+    userConfirmed = backupPathOrOptions.userConfirmed ?? userConfirmed;
+  }
+
   if (!userConfirmed) {
     throw new Error(
       'Destructive Action Protection: You must explicitly confirm database restoration (userConfirmed: true).'
     );
   }
 
-  if (!backupPath || !fs.existsSync(backupPath)) {
-    throw new Error(`Backup file not found at: ${backupPath}`);
+  if (!targetPath || typeof targetPath !== 'string') {
+    throw new Error('Valid backupPath string is required.');
   }
 
-  // Validate backup file before restoring
-  const testDb = new DatabaseSync(backupPath);
+  // Prevent path traversal: Resolve path and ensure it's a valid SQLite .db file within allowed directories
+  const resolvedPath = path.isAbsolute(targetPath)
+    ? path.resolve(targetPath)
+    : path.resolve(BACKUPS_DIR, targetPath);
+
+  const allowedDirs = [path.resolve(BACKUPS_DIR), path.resolve(DATA_DIR)];
+  const isWithinAllowed = allowedDirs.some(dir => resolvedPath.startsWith(dir));
+
+  if (!isWithinAllowed || !resolvedPath.endsWith('.db')) {
+    throw new Error(`Security Violation: Unsafe backup path "${targetPath}". Restoration is restricted to files in data/backups.`);
+  }
+
+  if (!fs.existsSync(resolvedPath)) {
+    throw new Error(`Backup file not found at: ${resolvedPath}`);
+  }
+
+  // Validate backup file integrity before touching active database
+  const testDb = new DatabaseSync(resolvedPath);
   const integrity = testDb.prepare('PRAGMA integrity_check').get();
   testDb.close();
 
@@ -102,8 +126,19 @@ export function restoreDatabase(backupPath, { userConfirmed = false } = {}) {
     throw new Error(`Cannot restore corrupted backup. Integrity check reported: ${JSON.stringify(integrity)}`);
   }
 
+  // Create temporary safety backup of active database before overwrite
+  if (fs.existsSync(DB_PATH)) {
+    const safetyCopyPath = path.join(BACKUPS_DIR, `pre_restore_safety_${Date.now()}.db`);
+    try {
+      if (!fs.existsSync(BACKUPS_DIR)) fs.mkdirSync(BACKUPS_DIR, { recursive: true });
+      fs.copyFileSync(DB_PATH, safetyCopyPath);
+    } catch (e) {
+      console.warn(`[Backup Notice] Could not create pre-restore safety copy: ${e.message}`);
+    }
+  }
+
   // Overwrite database file
-  fs.copyFileSync(backupPath, DB_PATH);
+  fs.copyFileSync(resolvedPath, DB_PATH);
 
   // Re-verify main database
   const restoredDb = getDatabase();
@@ -111,7 +146,7 @@ export function restoreDatabase(backupPath, { userConfirmed = false } = {}) {
 
   return {
     success: true,
-    restoredFrom: backupPath,
+    restoredFrom: resolvedPath,
     integrity: mainIntegrity ? mainIntegrity['integrity_check'] : 'ok',
     restoredAt: new Date().toISOString()
   };

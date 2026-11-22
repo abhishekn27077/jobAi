@@ -111,7 +111,7 @@ export async function fetchLeverJobs(companyToken, { query = null, timeoutMs = 1
       canonicalUrl,
       description: (item.descriptionPlain || item.description || '').trim(),
       salary: null,
-      postedAt: item.createdAt ? new Date(item.createdAt).toISOString() : new Date().toISOString(),
+      postedAt: item.createdAt ? new Date(item.createdAt).toISOString() : null,
       experienceMin,
       experienceMax,
       workMode,

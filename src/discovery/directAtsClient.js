@@ -11,7 +11,7 @@ export async function fetchSmartRecruitersJobs(companyToken, query = 'Java') {
       'User-Agent': 'CareerOS/2.0 (+https://github.com/abhishekn27077/jobAi)',
       'Accept': 'application/json'
     },
-    signal: AbortSignal.timeout(10000)
+    signal: AbortSignal.timeout(15000)
   });
 
   if (!resp.ok) {
@@ -49,7 +49,7 @@ export async function fetchSmartRecruitersJobs(companyToken, query = 'Java') {
       canonicalUrl,
       description: `${p.name} at ${cleanToken}. Department: ${p.department ? p.department.label : 'Engineering'}. Location: ${city}`,
       salary: null,
-      postedAt: p.releasedDate || new Date().toISOString(),
+      postedAt: p.releasedDate || null,
       experienceMin: p.experienceLevel ? (p.experienceLevel.id === 'entry_level' ? 0 : null) : null,
       experienceMax: null,
       workMode,
@@ -68,7 +68,7 @@ export async function fetchGreenhouseJobs(boardToken) {
       'User-Agent': 'CareerOS/2.0 (+https://github.com/abhishekn27077/jobAi)',
       'Accept': 'application/json'
     },
-    signal: AbortSignal.timeout(10000)
+    signal: AbortSignal.timeout(15000)
   });
 
   if (!resp.ok) {
@@ -113,7 +113,7 @@ export async function fetchGreenhouseJobs(boardToken) {
       canonicalUrl,
       description: plainDesc,
       salary: null,
-      postedAt: p.updated_at || new Date().toISOString(),
+      postedAt: p.updated_at || null,
       experienceMin: expMin,
       experienceMax: expMax,
       workMode,

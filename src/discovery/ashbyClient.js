@@ -121,7 +121,7 @@ export async function fetchAshbyJobs(companyToken, { query = null, timeoutMs = 1
       canonicalUrl,
       description: plainDesc,
       salary,
-      postedAt: item.publishedAt || new Date().toISOString(),
+      postedAt: item.publishedAt || null,
       experienceMin,
       experienceMax,
       workMode,

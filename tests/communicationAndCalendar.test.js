@@ -41,14 +41,13 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 test('Google OAuth Client enforces minimum scopes and handles token lifecycle', async () => {
-  // Test Scopes
-  assert.strictEqual(GOOGLE_OAUTH_SCOPES.length, 4);
+  // Test Minimum Scopes (Readonly + Compose drafts + Calendar events)
+  assert.strictEqual(GOOGLE_OAUTH_SCOPES.length, 3);
   assert.ok(GOOGLE_OAUTH_SCOPES.includes('https://www.googleapis.com/auth/gmail.readonly'));
   assert.ok(GOOGLE_OAUTH_SCOPES.includes('https://www.googleapis.com/auth/gmail.compose'));
   assert.ok(GOOGLE_OAUTH_SCOPES.includes('https://www.googleapis.com/auth/calendar.events'));
-  assert.ok(GOOGLE_OAUTH_SCOPES.includes('https://www.googleapis.com/auth/calendar.readonly'));
 
-  // Test Auth URL generation
+  // Test Auth URL generation with State and PKCE S256
   process.env.GMAIL_CLIENT_ID = 'test-client-id.apps.googleusercontent.com';
   process.env.GMAIL_CLIENT_SECRET = 'test-client-secret';
   const authUrl = getGoogleAuthUrl('http://localhost:3000/oauth2callback');
@@ -56,8 +55,11 @@ test('Google OAuth Client enforces minimum scopes and handles token lifecycle', 
   assert.ok(authUrl.includes('client_id=test-client-id'));
   assert.ok(authUrl.includes('scope='));
   assert.ok(authUrl.includes('access_type=offline'));
+  assert.ok(authUrl.includes('state='));
+  assert.ok(authUrl.includes('code_challenge='));
+  assert.ok(authUrl.includes('code_challenge_method=S256'));
 
-  // Test Token storage and retrieval
+  // Test Token storage and retrieval with AES-256-GCM encryption
   const dummyTokens = {
     access_token: 'dummy_access_token_123',
     refresh_token: 'dummy_refresh_token_456',
@@ -75,8 +77,16 @@ test('Google OAuth Client enforces minimum scopes and handles token lifecycle', 
   assert.strictEqual(status.authenticated, true);
   assert.strictEqual(status.hasRefreshToken, true);
 
-  // Test Disconnect and revocation
-  const disconnectRes = await disconnectAccount();
+  // Test Disconnect requires user confirmation gate
+  await assert.rejects(
+    async () => {
+      await disconnectAccount({ userConfirmed: false });
+    },
+    /User Confirmation Required/
+  );
+
+  // Test Disconnect and revocation with confirmation
+  const disconnectRes = await disconnectAccount({ userConfirmed: true });
   assert.strictEqual(disconnectRes.success, true);
   assert.strictEqual(loadStoredTokens(), null);
 });

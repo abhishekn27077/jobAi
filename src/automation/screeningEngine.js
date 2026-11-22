@@ -31,7 +31,7 @@ export function generateScreeningAnswers(job, customQuestions = []) {
     {
       key: 'experience_java',
       patterns: [/(years of )?experience.*(with )?java\b/i, /how many years.*java/i],
-      answer: '1 year of hands-on Java and Spring Boot development experience through MCA academic coursework, building full-stack applications (Employee Leave Management System), and my Java Full Stack internship at Anudip Foundation.',
+      answer: 'Fresher / Entry-level (0 years full-time employment) with hands-on Java and Spring Boot development experience through MCA academic coursework, building full-stack applications (Employee Leave Management System), and an Advanced Java Full Stack internship at Anudip Foundation.',
       confidence: 'high',
       evidence: 'candidate_profile.json -> experience[0] (Anudip Foundation Java Intern) & projects[2]',
       requiresUserInput: false
@@ -39,7 +39,7 @@ export function generateScreeningAnswers(job, customQuestions = []) {
     {
       key: 'experience_spring_boot',
       patterns: [/(years of )?experience.*spring\s*boot/i, /how many years.*spring/i],
-      answer: '1 year of practical experience building RESTful micro-services and MVC web applications using Spring Boot, Hibernate/JPA, and MySQL/PostgreSQL databases.',
+      answer: 'Fresher / Entry-level with practical project experience building RESTful micro-services and MVC web applications using Spring Boot, Hibernate/JPA, and MySQL/PostgreSQL databases during MCA studies and internship training.',
       confidence: 'high',
       evidence: 'candidate_profile.json -> experience[0] & projects[2] (Employee Leave Management System)',
       requiresUserInput: false
@@ -47,7 +47,7 @@ export function generateScreeningAnswers(job, customQuestions = []) {
     {
       key: 'experience_react',
       patterns: [/(years of )?experience.*react/i, /how many years.*react/i],
-      answer: '1 year of frontend development experience building reactive web applications using React.js and TypeScript, including state management, responsive UI, and REST API integration in NearVia and FinSight.',
+      answer: 'Fresher / Entry-level with frontend development experience building reactive web applications using React.js and TypeScript, including state management, responsive UI, and REST API integration in NearVia and FinSight.',
       confidence: 'high',
       evidence: 'candidate_profile.json -> projects[0] (NearVia) & projects[1] (FinSight)',
       requiresUserInput: false
@@ -55,7 +55,7 @@ export function generateScreeningAnswers(job, customQuestions = []) {
     {
       key: 'experience_python',
       patterns: [/(years of )?experience.*python/i, /how many years.*python/i],
-      answer: '1 year of Python experience developing FastAPI backend services, computer vision systems with OpenCV, and IoT integrations in academic and capstone projects.',
+      answer: 'Fresher / Entry-level with practical Python experience developing FastAPI backend services, computer vision systems with OpenCV, and IoT integrations in academic and capstone projects.',
       confidence: 'high',
       evidence: 'candidate_profile.json -> projects[1] (FinSight), projects[3] (Smart Rover), projects[5] (Drowsiness Detection)',
       requiresUserInput: false
@@ -164,13 +164,18 @@ export function validateAnswerTruthfulness(answer, profile) {
     }
   }
 
-  // 2. Experience years fabrication check (> 2 years for fresher)
-  const expMatch = text.match(/(\d+)\+?\s*years?\s*of\s*(professional|work|industry)\s*experience/i);
-  if (expMatch && parseInt(expMatch[1], 10) > 2) {
-    issues.push(`Answer claims ${expMatch[1]} years of professional experience, exceeding verified fresher/internship record.`);
+  // 2. Experience years fabrication check (flag claiming >= 1 years of professional/work/full-time experience)
+  const expMatch = text.match(/(\d+)\+?\s*years?\s*of\s*(professional|work|industry|full[- ]time)\s*experience/i);
+  if (expMatch && parseInt(expMatch[1], 10) >= 1) {
+    issues.push(`Answer claims ${expMatch[1]} years of professional experience, exceeding candidate's verified fresher status (0 years full-time experience).`);
   }
 
-  // 3. Unsupported architecture buzzwords
+  // 3. Anudip Foundation employment representation check
+  if (/\banudip\b/i.test(text) && /\b(full[- ]time|permanent\s*role|full[- ]time\s*software\s*engineer)\b/i.test(text)) {
+    issues.push('Anudip Foundation must be represented as an internship/practical training, not full-time employment.');
+  }
+
+  // 4. Unsupported architecture buzzwords
   if (/\b(production\s*kubernetes\s*cluster|architected\s*microservices\s*at\s*scale)\b/i.test(text)) {
     issues.push('Answer contains unsupported enterprise production claims.');
   }

@@ -51,7 +51,7 @@ export function renderResumeMarkdown(data) {
   if (skills.toolsAndConcepts?.length) md += `- **Tools & Concepts:** ${skills.toolsAndConcepts.join(', ')}\n`;
   md += `\n---\n\n`;
 
-  md += `## PROFESSIONAL EXPERIENCE\n`;
+  md += `## INTERNSHIPS & PRACTICAL TRAINING\n`;
   for (const e of exp) {
     md += `### ${e.role} | ${e.company} (${e.period})\n`;
     if (e.bullets?.length) {
@@ -197,7 +197,7 @@ function renderAtsProfessionalHtml(p, s, skills, exp, projects, edu, certs) {
   <div class="skills-row"><strong>Databases:</strong> ${(skills.databases || []).join(', ')}</div>
   <div class="skills-row"><strong>Developer Tools:</strong> ${(skills.toolsAndConcepts || []).join(', ')}</div>
 
-  <h2>Professional Experience</h2>
+  <h2>Internships & Practical Training</h2>
   ${exp.map(e => `
     <div class="entry-title">${escapeXml(e.role)} — ${escapeXml(e.company)}</div>
     <div class="entry-sub">${escapeXml(e.period)} | ${escapeXml(e.type || 'Internship')}</div>
@@ -354,7 +354,7 @@ function renderModernProfessionalHtml(p, s, skills, exp, projects, edu, certs) {
   <div class="skill-badge-row"><strong>Databases:</strong> ${(skills.databases || []).join(', ')}</div>
   <div class="skill-badge-row"><strong>Tools & Cloud:</strong> ${(skills.toolsAndConcepts || []).join(', ')}</div>
 
-  <h2>Professional Experience</h2>
+  <h2>Internships & Practical Training</h2>
   ${exp.map(e => `
     <div class="entry-header">
       <span class="entry-title">${escapeXml(e.role)} — ${escapeXml(e.company)}</span>
@@ -498,7 +498,7 @@ function renderCompactOnePageHtml(p, s, skills, exp, projects, edu, certs) {
   <div class="skills-row"><strong>Frontend & Databases:</strong> ${(skills.frontend || []).join(', ')} | ${(skills.databases || []).join(', ')}</div>
   <div class="skills-row"><strong>Tools & Cloud:</strong> ${(skills.toolsAndConcepts || []).join(', ')}</div>
 
-  <h2>Professional Experience</h2>
+  <h2>Internships & Practical Training</h2>
   ${exp.map(e => `
     <div class="entry-title">${escapeXml(e.role)} — ${escapeXml(e.company)} (${escapeXml(e.period)})</div>
     <ul>

@@ -7,6 +7,19 @@ export function saveOrUpdateJob(rawJob) {
   const db = getDatabase();
 
   const validation = validateJobRecord(rawJob);
+  if (!validation.isValid) {
+    return {
+      success: false,
+      isNew: false,
+      isValid: false,
+      jobId: null,
+      errors: validation.errors,
+      error: `Validation failed: ${validation.errors.join(', ')}`,
+      validation,
+      evaluation: null
+    };
+  }
+
   const job = validation.normalizedJob || rawJob;
   const canonicalUrl = normalizeCanonicalUrl(job.url || '');
 
@@ -101,7 +114,7 @@ export function saveOrUpdateJob(rawJob) {
       canonicalUrl || job.url,
       job.description,
       job.salary,
-      job.postedAt || new Date().toISOString(),
+      job.postedAt || null,
       job.experienceMin,
       job.experienceMax,
       'discovered',
@@ -151,7 +164,7 @@ export function saveOrUpdateJob(rawJob) {
     evalResult.breakdown.roleScore
   );
 
-  return { jobId, isNew: !existing, evaluation: evalResult, validation };
+  return { success: true, isValid: true, jobId, isNew: !existing, evaluation: evalResult, validation };
 }
 
 export function getJobs({ status, recommendation, minScore = 0, source, location, workMode, verificationStatus, limit = 50, offset = 0 } = {}) {
@@ -226,6 +239,18 @@ export function getJobs({ status, recommendation, minScore = 0, source, location
     required_skills: r.required_skills ? JSON.parse(r.required_skills) : [],
     preferred_skills: r.preferred_skills ? JSON.parse(r.preferred_skills) : []
   }));
+}
+
+export function getJobById(id) {
+  const db = getDatabase();
+  const row = db.prepare('SELECT * FROM jobs WHERE id = ?').get(id);
+  if (!row) return null;
+  return {
+    ...row,
+    skills: row.skills ? JSON.parse(row.skills) : [],
+    required_skills: row.required_skills ? JSON.parse(row.required_skills) : [],
+    preferred_skills: row.preferred_skills ? JSON.parse(row.preferred_skills) : []
+  };
 }
 
 export function updateJobStatus(jobId, newStatus) {

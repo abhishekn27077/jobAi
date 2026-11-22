@@ -114,9 +114,9 @@ export function auditDocumentTruthfulness(content, profile) {
           const mpLower = mp.name.toLowerCase();
           const pLower = pName.toLowerCase();
           return mpLower === pLower ||
-                 mpLower.includes(pLower) ||
-                 pLower.includes(mpLower) ||
-                 mpLower.split(/[\s–—-]+/)[0] === pLower.split(/[\s–—-]+/)[0];
+            mpLower.includes(pLower) ||
+            pLower.includes(mpLower) ||
+            mpLower.split(/[\s–—-]+/)[0] === pLower.split(/[\s–—-]+/)[0];
         });
         if (match) {
           claimAudits.push({
@@ -187,7 +187,7 @@ export function auditDocumentTruthfulness(content, profile) {
           const targetOrg = org.toLowerCase();
           const targetRole = role.toLowerCase();
           return (cName && targetOrg && (cName.includes(targetOrg) || targetOrg.includes(cName))) ||
-                 (rName && targetRole && (rName.includes(targetRole) || targetRole.includes(rName)));
+            (rName && targetRole && (rName.includes(targetRole) || targetRole.includes(rName)));
         });
         if (matchIntern) {
           claimAudits.push({
@@ -302,7 +302,7 @@ ${summary}
 
 ---
 
-## PROFESSIONAL EXPERIENCE
+## INTERNSHIPS & PRACTICAL TRAINING
 - **Advanced Java Full Stack Development Intern** | Oct 2026  
   *Anudip Foundation, Bangalore*  
   - Developed Java applications applying Object-Oriented Programming (OOP), JDBC, Collections Framework, and Multithreading.
@@ -389,7 +389,7 @@ ${proj.bullets.map(b => `- ${b}`).join('\n')}
   <h3>Bachelor of Computer Applications (BCA) — SSA Government First Grade College, Ballari</h3>
   <div class="subtitle">2021 – 2024</div>
 
-  <h2>Professional Experience</h2>
+  <h2>Internships & Practical Training</h2>
   <h3>Advanced Java Full Stack Development Intern — Anudip Foundation, Bangalore</h3>
   <div class="subtitle">Oct 2026</div>
   <ul>

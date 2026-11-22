@@ -30,8 +30,8 @@ export function evaluateJobFit(job) {
   const hasFresherKeyword = fresherKeywords.some(kw => textToScan.includes(kw));
 
   // Check experience numbers
-  const expMin = job.experienceMin;
-  const expMax = job.experienceMax;
+  const expMin = job.experienceMin !== undefined ? job.experienceMin : (job.experience_min !== undefined ? job.experience_min : null);
+  const expMax = job.experienceMax !== undefined ? job.experienceMax : (job.experience_max !== undefined ? job.experience_max : null);
 
   if (hasSeniorTitle) {
     seniorityScore = 0;

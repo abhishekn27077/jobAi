@@ -51,20 +51,54 @@ export async function syncRecruiterEmails({ mockMessages = null, forceFull = fal
         };
       }
 
-      // Query Gmail messages targeting recruiter communications
-      const query = "subject:(interview OR application OR offer OR assessment OR test OR rejection OR 'hiring') -from:me";
-      const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=30`;
-
-      const listResp = await fetch(listUrl, {
-        headers: { 'Authorization': `Bearer ${accessToken}` }
-      });
-
-      if (!listResp.ok) {
-        throw new Error(`Gmail API messages list failed: ${listResp.status} ${await listResp.text()}`);
+      // Incremental Sync: when forceFull is false, fetch messages after the last sync timestamp
+      let finalQuery = "subject:(interview OR application OR offer OR assessment OR test OR rejection OR 'hiring') -from:me";
+      if (!forceFull) {
+        const lastSync = db.prepare("SELECT created_at FROM email_sync_history WHERE status = 'success' ORDER BY id DESC LIMIT 1").get();
+        if (lastSync && lastSync.created_at) {
+          const afterEpochSec = Math.floor(new Date(lastSync.created_at).getTime() / 1000) - 86400; // 1-day safety margin
+          if (afterEpochSec > 0) {
+            finalQuery += ` after:${afterEpochSec}`;
+          }
+        }
       }
 
-      const listData = await listResp.json();
-      const messageIds = (listData.messages || []).map(m => m.id);
+      // Paginate through messages using nextPageToken (up to 5 pages / 150 messages max for safety)
+      let pageToken = null;
+      const messageIds = [];
+      let pageCount = 0;
+      const maxPages = 5;
+
+      do {
+        let listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(finalQuery)}&maxResults=30`;
+        if (pageToken) {
+          listUrl += `&pageToken=${encodeURIComponent(pageToken)}`;
+        }
+
+        const listResp = await fetch(listUrl, {
+          headers: { 'Authorization': `Bearer ${accessToken}` }
+        });
+
+        if (listResp.status === 401 || listResp.status === 403) {
+          return {
+            success: false,
+            error: `Gmail authorization error (HTTP ${listResp.status}). Re-authentication required.`,
+            requiresAuth: true
+          };
+        }
+
+        if (!listResp.ok) {
+          throw new Error(`Gmail API messages list failed: ${listResp.status} ${await listResp.text()}`);
+        }
+
+        const listData = await listResp.json();
+        const batchIds = (listData.messages || []).map(m => m.id).filter(Boolean);
+        messageIds.push(...batchIds);
+
+        pageToken = listData.nextPageToken || null;
+        pageCount++;
+      } while (pageToken && pageCount < maxPages && messageIds.length < 150);
+
       messagesFound = messageIds.length;
 
       // Fetch message details
@@ -77,7 +111,9 @@ export async function syncRecruiterEmails({ mockMessages = null, forceFull = fal
             const msgData = await msgResp.json();
             rawMessages.push(parseRawGmailMessage(msgData));
           }
-        } catch {}
+        } catch (fetchErr) {
+          console.warn(`[Gmail Sync Warning] Failed to fetch message #${id}: ${fetchErr.message}`);
+        }
       }
     }
 
@@ -241,29 +277,98 @@ export async function syncRecruiterEmails({ mockMessages = null, forceFull = fal
 }
 
 /**
+ * Recursively extracts plain text or HTML body from Gmail MIME payload.
+ * Handles single-part payloads, base64url decoding, and nested multipart parts.
+ */
+export function extractMimeBody(payload) {
+  if (!payload) return '';
+
+  // 1. Direct body data on single-part payload (e.g. text/plain or text/html)
+  if (payload.body?.data && (!payload.parts || payload.parts.length === 0)) {
+    try {
+      return Buffer.from(payload.body.data, 'base64url').toString('utf-8');
+    } catch {
+      try {
+        return Buffer.from(payload.body.data, 'base64').toString('utf-8');
+      } catch {}
+    }
+  }
+
+  // 2. Multipart recursive traversal (prefer text/plain, fallback to text/html)
+  let textPlain = '';
+  let textHtml = '';
+
+  function walkParts(parts = []) {
+    for (const part of parts) {
+      if (part.mimeType === 'text/plain' && part.body?.data && !textPlain) {
+        try {
+          textPlain = Buffer.from(part.body.data, 'base64url').toString('utf-8');
+        } catch {
+          try {
+            textPlain = Buffer.from(part.body.data, 'base64').toString('utf-8');
+          } catch {}
+        }
+      } else if (part.mimeType === 'text/html' && part.body?.data && !textHtml) {
+        try {
+          textHtml = Buffer.from(part.body.data, 'base64url').toString('utf-8');
+        } catch {
+          try {
+            textHtml = Buffer.from(part.body.data, 'base64').toString('utf-8');
+          } catch {}
+        }
+      }
+      if (part.parts && Array.isArray(part.parts)) {
+        walkParts(part.parts);
+      }
+    }
+  }
+
+  if (payload.parts && Array.isArray(payload.parts)) {
+    walkParts(payload.parts);
+  }
+
+  if (textPlain) return textPlain;
+  if (textHtml) {
+    return textHtml
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  return '';
+}
+
+/**
  * Parses raw Gmail REST API payload into standard internal format.
  */
-function parseRawGmailMessage(msgData) {
+export function parseRawGmailMessage(msgData) {
+  if (!msgData) return null;
   const headers = msgData.payload?.headers || [];
   const getHeader = (name) => headers.find(h => h.name.toLowerCase() === name.toLowerCase())?.value || '';
 
   const subject = getHeader('Subject');
   const from = getHeader('From');
   const to = getHeader('To');
-  const date = getHeader('Date') ? new Date(getHeader('Date')).toISOString() : new Date().toISOString();
 
-  // Extract body snippet or text
-  let body = msgData.snippet || '';
-  if (msgData.payload?.parts) {
-    for (const part of msgData.payload.parts) {
-      if (part.mimeType === 'text/plain' && part.body?.data) {
-        try {
-          body = Buffer.from(part.body.data, 'base64').toString('utf-8');
-          break;
-        } catch {}
-      }
+  // Defensive RFC 2822 date parsing
+  let date = null;
+  const rawDate = getHeader('Date');
+  if (rawDate) {
+    const parsed = new Date(rawDate);
+    if (!Number.isNaN(parsed.getTime())) {
+      date = parsed.toISOString();
     }
   }
+  if (!date && msgData.internalDate) {
+    const parsed = new Date(Number(msgData.internalDate));
+    if (!Number.isNaN(parsed.getTime())) {
+      date = parsed.toISOString();
+    }
+  }
+
+  const body = extractMimeBody(msgData.payload) || msgData.snippet || '';
 
   return {
     messageId: msgData.id,

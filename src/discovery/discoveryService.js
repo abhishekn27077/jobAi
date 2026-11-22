@@ -49,6 +49,10 @@ export async function runJobDiscovery({ customQuery = null, maxPerQuery = 20, co
         totalFound++;
         sourceStats.freehire.scanned++;
         const saveRes = saveOrUpdateJob(job);
+        if (!saveRes.jobId || saveRes.isValid === false) {
+          sourceStats.freehire.errors = (sourceStats.freehire.errors || 0) + 1;
+          continue;
+        }
         if (saveRes.isNew) {
           newAdded++;
           qNew++;
@@ -124,6 +128,10 @@ export async function runJobDiscovery({ customQuery = null, maxPerQuery = 20, co
             totalFound++;
             sourceStats[portal].scanned++;
             const saveRes = saveOrUpdateJob(job);
+            if (!saveRes.jobId || saveRes.isValid === false) {
+              sourceStats[portal].errors++;
+              continue;
+            }
             if (saveRes.isNew) {
               newAdded++;
               cNew++;

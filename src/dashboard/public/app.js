@@ -377,7 +377,7 @@ function createJobCard(job) {
           <span>📍 ${escapeHtml(job.location || 'India')}</span>
           ${job.salary ? `<span>💰 ${escapeHtml(job.salary)}</span>` : ''}
           ${job.experience_min !== null ? `<span>🎓 Exp: ${job.experience_min}${job.experience_max ? `-${job.experience_max}` : '+'} yrs</span>` : ''}
-          <span>📅 ${job.posted_at ? job.posted_at.split('T')[0] : 'Recent'}</span>
+          <span>📅 ${job.posted_at ? job.posted_at.split('T')[0] : 'Date unlisted'}</span>
         </div>
       </div>
       <div class="score-badge">
@@ -763,10 +763,10 @@ async function openPortalMatrixModal() {
           </div>
           <p style="font-size: 12px; color: #cbd5e1; margin-bottom: 8px;">${escapeHtml(p.description)}</p>
           <div style="font-size: 12px; color: #94a3b8; margin-bottom: 4px;">
-            <span style="color: #4ade80; font-weight: 600;">Automated Pre-Fill:</span> ${escapeHtml(p.automatedActions.join(' • ')}
+            <span style="color: #4ade80; font-weight: 600;">Automated Pre-Fill:</span> ${escapeHtml(p.automatedActions.join(' • '))}
           </div>
           <div style="font-size: 12px; color: #94a3b8;">
-            <span style="color: #f59e0b; font-weight: 600;">Manual User Step:</span> ${escapeHtml(p.manualActionsRequired.join(' • ')}
+            <span style="color: #f59e0b; font-weight: 600;">Manual User Step:</span> ${escapeHtml(p.manualActionsRequired.join(' • '))}
           </div>
         </div>
       `;

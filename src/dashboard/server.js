@@ -28,7 +28,7 @@ import {
 } from '../resumes/resumeVersionManager.js';
 import { prepareApplication } from '../automation/applicationWorkflow.js';
 import { getApplications, getApplicationByJobId, updateApplicationStatus as updateAppStatus, getPortalSupportMatrix } from '../tracker/applicationTracker.js';
-import { getGoogleAuthUrl, disconnectAccount, getOAuthStatus } from '../email/googleOAuthClient.js';
+import { getGoogleAuthUrl, disconnectAccount, getOAuthStatus, exchangeCodeForTokens } from '../email/googleOAuthClient.js';
 import { generateCommunicationDraft, saveDraftToVault, approveAndPublishDraft } from '../email/communicationAssistant.js';
 import { syncRecruiterEmails } from '../email/emailSyncService.js';
 import { proposeCalendarEvent, approveAndCreateCalendarEvent, cancelCalendarEvent, getCalendarEvents } from '../calendar/calendarService.js';
@@ -61,30 +61,200 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const OUTPUT_DIR = path.resolve(__dirname, '../../output');
+const MAX_BODY_SIZE_BYTES = 512 * 1024; // 512 KB request limit
+
+/**
+ * Strips internal server filesystem paths and stack traces from error messages before sending to clients.
+ */
+function sanitizeErrorMessage(msg) {
+  if (!msg || typeof msg !== 'string') return 'An error occurred during processing.';
+  return msg
+    .replace(/[A-Za-z]:\\[^ \t\r\n'"]+/g, '[REDACTED_PATH]')
+    .replace(/\/[a-zA-Z0-9_.-]+(?:\/[a-zA-Z0-9_.-]+)+/g, '[REDACTED_PATH]');
+}
+
+/**
+ * Safely reads and parses JSON request body with strict Content-Type and payload size validation.
+ */
+function readJsonBody(req, { maxSize = MAX_BODY_SIZE_BYTES } = {}) {
+  return new Promise((resolve, reject) => {
+    const contentLength = req.headers['content-length'];
+    if (contentLength && parseInt(contentLength, 10) > maxSize) {
+      const err = new Error('Payload Too Large: Request body exceeds the 512KB limit.');
+      err.statusCode = 413;
+      return reject(err);
+    }
+
+    const contentType = req.headers['content-type'] || '';
+    // If body is present and Content-Type is specified, must be JSON
+    if (contentType && !contentType.toLowerCase().includes('application/json')) {
+      const err = new Error(`Unsupported Media Type: Expected application/json but received "${contentType}".`);
+      err.statusCode = 415;
+      return reject(err);
+    }
+
+    let rawData = '';
+    let bytesReceived = 0;
+
+    req.on('data', chunk => {
+      bytesReceived += chunk.length;
+      if (bytesReceived > maxSize) {
+        req.destroy();
+        const err = new Error('Payload Too Large: Request body exceeds the 512KB limit.');
+        err.statusCode = 413;
+        return reject(err);
+      }
+      rawData += chunk;
+    });
+
+    req.on('end', () => {
+      if (!rawData || rawData.trim() === '') {
+        return resolve({});
+      }
+      try {
+        const parsed = JSON.parse(rawData);
+        resolve(parsed);
+      } catch {
+        const err = new Error('Bad Request: Malformed JSON payload.');
+        err.statusCode = 400;
+        reject(err);
+      }
+    });
+
+    req.on('error', err => {
+      err.statusCode = 400;
+      reject(err);
+    });
+  });
+}
+
+/**
+ * Helper to validate positive integer IDs in URL paths.
+ */
+function parseValidId(paramStr, paramName = 'ID') {
+  const num = parseInt(paramStr, 10);
+  if (!Number.isInteger(num) || num <= 0) {
+    const err = new Error(`Bad Request: Invalid ${paramName} parameter.`);
+    err.statusCode = 400;
+    throw err;
+  }
+  return num;
+}
 
 export function startDashboardServer(port = 3000, host = '127.0.0.1') {
-  const server = http.createServer(async (req, res) => {
-    // Enable CORS for local convenience
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  const allowedHosts = [
+    `${host}:${port}`,
+    `localhost:${port}`,
+    `127.0.0.1:${port}`,
+    `[::1]:${port}`,
+    'localhost',
+    '127.0.0.1',
+    '[::1]'
+  ];
 
+  const allowedOrigins = [
+    `http://${host}:${port}`,
+    `http://localhost:${port}`,
+    `http://127.0.0.1:${port}`
+  ];
+
+  const server = http.createServer(async (req, res) => {
+    // 1. Host Header Validation (DNS Rebinding Prevention)
+    const reqHost = req.headers['host'];
+    if (!reqHost || !allowedHosts.includes(reqHost)) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Bad Request: Host header validation failed.' }));
+      return;
+    }
+
+    // 2. Strict Origin & CORS Validation (No Wildcards)
+    const reqOrigin = req.headers['origin'];
+    if (reqOrigin) {
+      if (!allowedOrigins.includes(reqOrigin)) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Forbidden: Untrusted cross-origin request rejected.' }));
+        return;
+      }
+      res.setHeader('Access-Control-Allow-Origin', reqOrigin);
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-CareerOS-CSRF, X-Requested-With');
+      res.setHeader('Vary', 'Origin');
+    }
+
+    // Handle Preflight
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
       res.end();
       return;
     }
 
+    // 3. CSRF Protection for State-Changing Requests
+    const isStateChanging = ['POST', 'PUT', 'DELETE', 'PATCH'].includes(req.method);
+    if (isStateChanging) {
+      const secFetchSite = req.headers['sec-fetch-site'];
+      if (secFetchSite === 'cross-site') {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Forbidden: Cross-site state-changing request blocked.' }));
+        return;
+      }
+    }
+
     const parsedUrl = new URL(req.url, `http://${host}:${port}`);
     const pathname = parsedUrl.pathname;
 
-    // Helper to send JSON
+    // Helper to send sanitized JSON responses
     const sendJson = (statusCode, data) => {
       res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+      if (data && data.error) {
+        data.error = sanitizeErrorMessage(data.error);
+      }
       res.end(JSON.stringify(data));
     };
 
-    // API Routes
+    // Helper to handle body reading errors
+    const safeReadBody = async () => {
+      try {
+        return await readJsonBody(req);
+      } catch (err) {
+        sendJson(err.statusCode || 400, { error: err.message });
+        return null;
+      }
+    };
+
+    // ==========================================
+    // API ROUTES
+    // ==========================================
+
+    // OAuth 2.0 Callback Handler
+    if ((pathname === '/oauth2callback' || pathname === '/api/oauth/callback') && req.method === 'GET') {
+      const code = parsedUrl.searchParams.get('code');
+      const state = parsedUrl.searchParams.get('state');
+      const oauthErr = parsedUrl.searchParams.get('error');
+
+      if (oauthErr) {
+        sendJson(400, { error: `Google OAuth authorization declined: ${oauthErr}` });
+        return;
+      }
+
+      if (!code || !state) {
+        sendJson(400, { error: 'Bad Request: Missing OAuth authorization code or state parameter.' });
+        return;
+      }
+
+      try {
+        await exchangeCodeForTokens(code, {
+          state,
+          redirectUri: `http://localhost:${port}/oauth2callback`
+        });
+        res.writeHead(302, { Location: '/?oauth=connected' });
+        res.end();
+      } catch (err) {
+        sendJson(400, { error: err.message });
+      }
+      return;
+    }
+
+    // GET /api/stats
     if (pathname === '/api/stats' && req.method === 'GET') {
       try {
         const stats = getStats();
@@ -95,6 +265,7 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
       return;
     }
 
+    // GET /api/jobs
     if (pathname === '/api/jobs' && req.method === 'GET') {
       try {
         const status = parsedUrl.searchParams.get('status') || undefined;
@@ -104,7 +275,7 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
         const workMode = parsedUrl.searchParams.get('workMode') || undefined;
         const verificationStatus = parsedUrl.searchParams.get('verificationStatus') || undefined;
         const minScore = parseInt(parsedUrl.searchParams.get('minScore') || '0', 10);
-        const limit = parseInt(parsedUrl.searchParams.get('limit') || '100', 10);
+        const limit = Math.min(parseInt(parsedUrl.searchParams.get('limit') || '100', 10), 500);
         const offset = parseInt(parsedUrl.searchParams.get('offset') || '0', 10);
 
         const jobs = getJobs({ status, recommendation, minScore, source, location, workMode, verificationStatus, limit, offset });
@@ -115,6 +286,7 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
       return;
     }
 
+    // GET /api/scan-history
     if (pathname === '/api/scan-history' && req.method === 'GET') {
       try {
         const history = getScanHistory(30);
@@ -125,36 +297,36 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
       return;
     }
 
+    // POST /api/job/status
     if (pathname === '/api/job/status' && req.method === 'POST') {
-      let body = '';
-      req.on('data', chunk => { body += chunk; });
-      req.on('end', () => {
-        try {
-          const { jobId, newStatus } = JSON.parse(body);
-          const result = updateJobStatus(Number(jobId), newStatus);
-          sendJson(200, result);
-        } catch (e) {
-          sendJson(400, { error: e.message });
-        }
-      });
+      const body = await safeReadBody();
+      if (body === null) return;
+
+      try {
+        const jobId = parseValidId(body.jobId, 'jobId');
+        const result = updateJobStatus(jobId, body.newStatus);
+        sendJson(200, result);
+      } catch (e) {
+        sendJson(e.statusCode || 400, { error: e.message });
+      }
       return;
     }
 
+    // POST /api/scan
     if (pathname === '/api/scan' && req.method === 'POST') {
-      let body = '';
-      req.on('data', chunk => { body += chunk; });
-      req.on('end', async () => {
-        try {
-          const data = body ? JSON.parse(body) : {};
-          const result = await runJobDiscovery({ customQuery: data.query || null });
-          sendJson(200, result);
-        } catch (e) {
-          sendJson(500, { error: e.message });
-        }
-      });
+      const body = await safeReadBody();
+      if (body === null) return;
+
+      try {
+        const result = await runJobDiscovery({ customQuery: body.query || null });
+        sendJson(200, result);
+      } catch (e) {
+        sendJson(500, { error: e.message });
+      }
       return;
     }
 
+    // GET /api/profile
     if (pathname === '/api/profile' && req.method === 'GET') {
       try {
         const profile = loadCandidateProfile();
@@ -165,12 +337,10 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
       return;
     }
 
-    // --- NEW MODULE ENDPOINTS ---
-
-    // 1. Tailor Resume & Cover Letter
+    // POST /api/job/:id/tailor
     if (pathname.startsWith('/api/job/') && pathname.endsWith('/tailor') && req.method === 'POST') {
-      const jobId = parseInt(pathname.split('/')[3], 10);
       try {
+        const jobId = parseValidId(pathname.split('/')[3], 'Job ID');
         const db = getDatabase();
         const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(jobId);
         if (!job) {
@@ -189,21 +359,25 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
           resumePdfPath: exported.resumePdfPath
         });
       } catch (e) {
-        sendJson(500, { error: e.message });
+        sendJson(e.statusCode || 500, { error: e.message });
       }
       return;
     }
 
-    // 2. Download Tailored PDF Resume
+    // GET /api/download/resume/:id (with Path Traversal Guard)
     if (pathname.startsWith('/api/download/resume/') && req.method === 'GET') {
-      const jobId = parseInt(pathname.split('/')[4], 10);
       try {
-        const resumesDir = path.join(OUTPUT_DIR, 'resumes');
+        const jobId = parseValidId(pathname.split('/')[4], 'Job ID');
+        const resumesDir = path.resolve(OUTPUT_DIR, 'resumes');
         if (fs.existsSync(resumesDir)) {
           const files = fs.readdirSync(resumesDir);
           const pdfFile = files.find(f => f.startsWith(`${jobId}_`) && f.endsWith('.pdf'));
           if (pdfFile) {
-            const fullPath = path.join(resumesDir, pdfFile);
+            const fullPath = path.resolve(resumesDir, pdfFile);
+            if (!fullPath.startsWith(resumesDir)) {
+              sendJson(403, { error: 'Access Denied: Path outside allowed directory.' });
+              return;
+            }
             res.writeHead(200, {
               'Content-Type': 'application/pdf',
               'Content-Disposition': `inline; filename="${pdfFile}"`
@@ -214,89 +388,101 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
         }
         sendJson(404, { error: 'PDF not generated yet. Please click Tailor Resume first.' });
       } catch (e) {
-        sendJson(500, { error: e.message });
+        sendJson(e.statusCode || 500, { error: e.message });
       }
       return;
     }
 
-    // 3. Prepare Application Dossier
+    // GET /api/job/:id/application
     if (pathname.startsWith('/api/job/') && pathname.endsWith('/application') && req.method === 'GET') {
-      const jobId = parseInt(pathname.split('/')[3], 10);
       try {
+        const jobId = parseValidId(pathname.split('/')[3], 'Job ID');
         const dossier = await prepareApplication(jobId);
         sendJson(200, { success: true, dossier });
       } catch (e) {
-        sendJson(500, { error: e.message });
+        sendJson(e.statusCode || 500, { error: e.message });
       }
       return;
     }
 
-    // 4. Launch Headed Playwright Form Assistant (with strict Human Approval Gate)
+    // POST /api/job/:id/assist (Strict Human Approval Gate)
     if (pathname.startsWith('/api/job/') && pathname.endsWith('/assist') && req.method === 'POST') {
-      const jobId = parseInt(pathname.split('/')[3], 10);
-      let body = '';
-      req.on('data', chunk => { body += chunk; });
-      req.on('end', async () => {
-        try {
-          const db = getDatabase();
-          const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(jobId);
-          if (!job) {
-            sendJson(404, { error: `Job with ID ${jobId} not found` });
-            return;
-          }
+      const body = await safeReadBody();
+      if (body === null) return;
 
-          const payload = body ? JSON.parse(body) : {};
-          if (!payload.userConfirmedApproval) {
-            sendJson(400, {
-              success: false,
-              error: 'Human Approval Gate: You must explicitly approve the application preparation and proposed answers before launching the browser assistant.'
-            });
-            return;
-          }
-
-          // Launch in background so HTTP response returns promptly
-          launchFormAssistant(job, {
-            userConfirmedApproval: true,
-            resumePdfPath: payload.resumePdfPath || null,
-            screeningAnswers: payload.screeningAnswers || null,
-            headless: false
-          }).catch(err => {
-            console.error('[Form Assistant Launch Error]:', err.message);
-          });
-
-          sendJson(200, {
-            success: true,
-            message: `Visible Chrome browser is launching for ${job.title} @ ${job.company}. Please review all pre-filled fields and submit manually.`
-          });
-        } catch (e) {
-          sendJson(500, { error: e.message });
+      try {
+        const jobId = parseValidId(pathname.split('/')[3], 'Job ID');
+        const db = getDatabase();
+        const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(jobId);
+        if (!job) {
+          sendJson(404, { error: `Job with ID ${jobId} not found` });
+          return;
         }
-      });
+
+        if (!body.userConfirmedApproval) {
+          sendJson(400, {
+            success: false,
+            error: 'Human Approval Gate: You must explicitly approve application preparation before launching browser assistant.'
+          });
+          return;
+        }
+
+        if (job.status === 'expired' || job.verification_status === 'expired') {
+          sendJson(400, {
+            success: false,
+            error: `Job Freshness Safeguard: Job #${jobId} is marked as expired or closed. Autofill is blocked.`
+          });
+          return;
+        }
+
+        if (job.fresher_eligible === 0) {
+          sendJson(400, {
+            success: false,
+            error: 'Eligibility Safeguard: Candidate fresher profile is ineligible for this role. Autofill is blocked.'
+          });
+          return;
+        }
+
+        launchFormAssistant(job, {
+          userConfirmedApproval: true,
+          resumePdfPath: body.resumePdfPath || null,
+          screeningAnswers: body.screeningAnswers || null,
+          headless: false
+        }).catch(err => {
+          console.error('[Form Assistant Launch Error]:', err.message);
+        });
+
+        sendJson(200, {
+          success: true,
+          message: `Browser assistant launching for ${job.title} @ ${job.company}. Review all fields and submit manually.`
+        });
+      } catch (e) {
+        sendJson(e.statusCode || 500, { error: e.message });
+      }
       return;
     }
 
-    // 5. Update Application Status & Confirm Submission
+    // POST /api/job/:id/application/status
     if (pathname.startsWith('/api/job/') && pathname.endsWith('/application/status') && req.method === 'POST') {
-      const jobId = parseInt(pathname.split('/')[3], 10);
-      let body = '';
-      req.on('data', chunk => { body += chunk; });
-      req.on('end', () => {
-        try {
-          const { status, notes, confirmationNumber, userConfirmed } = JSON.parse(body);
-          const result = updateAppStatus(jobId, status, { notes, confirmationNumber, userConfirmed });
-          sendJson(200, result);
-        } catch (e) {
-          sendJson(400, { error: e.message });
-        }
-      });
+      const body = await safeReadBody();
+      if (body === null) return;
+
+      try {
+        const jobId = parseValidId(pathname.split('/')[3], 'Job ID');
+        const { status, notes, confirmationNumber, userConfirmed } = body;
+        const result = updateAppStatus(jobId, status, { notes, confirmationNumber, userConfirmed });
+        sendJson(200, result);
+      } catch (e) {
+        sendJson(400, { error: e.message });
+      }
       return;
     }
 
-    // 6. List Applications Pipeline
+    // GET /api/applications
     if (pathname === '/api/applications' && req.method === 'GET') {
       try {
         const status = parsedUrl.searchParams.get('status') || undefined;
-        const limit = parseInt(parsedUrl.searchParams.get('limit') || '50', 10);
+        const limit = Math.min(parseInt(parsedUrl.searchParams.get('limit') || '50', 10), 200);
         const offset = parseInt(parsedUrl.searchParams.get('offset') || '0', 10);
         const applications = getApplications({ status, limit, offset });
         sendJson(200, { applications });
@@ -306,7 +492,7 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
       return;
     }
 
-    // 7. Portal Support Matrix
+    // GET /api/portals
     if (pathname === '/api/portals' && req.method === 'GET') {
       try {
         const portals = getPortalSupportMatrix();
@@ -317,7 +503,7 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
       return;
     }
 
-    // 8. Communications & Calendar Intelligence: Summary
+    // GET /api/communications/summary
     if (pathname === '/api/communications/summary' && req.method === 'GET') {
       try {
         const db = getDatabase();
@@ -361,12 +547,12 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
       return;
     }
 
-    // 9. Communications: List Emails
+    // GET /api/communications/emails
     if (pathname === '/api/communications/emails' && req.method === 'GET') {
       try {
         const db = getDatabase();
         const category = parsedUrl.searchParams.get('category');
-        const limit = parseInt(parsedUrl.searchParams.get('limit') || '50', 10);
+        const limit = Math.min(parseInt(parsedUrl.searchParams.get('limit') || '50', 10), 200);
 
         let query = `
           SELECT c.*, j.company as job_company, j.title as job_title
@@ -390,7 +576,7 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
       return;
     }
 
-    // 10. Communications: Sync Emails
+    // POST /api/communications/sync
     if (pathname === '/api/communications/sync' && req.method === 'POST') {
       try {
         const result = await syncRecruiterEmails();
@@ -401,66 +587,58 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
       return;
     }
 
-    // 11. Communications: Generate Draft
+    // POST /api/communications/draft
     if (pathname === '/api/communications/draft' && req.method === 'POST') {
-      let body = '';
-      req.on('data', chunk => { body += chunk; });
-      req.on('end', () => {
-        try {
-          const payload = body ? JSON.parse(body) : {};
-          const db = getDatabase();
-          const job = payload.jobId ? db.prepare('SELECT * FROM jobs WHERE id = ?').get(payload.jobId) : null;
+      const body = await safeReadBody();
+      if (body === null) return;
 
-          const draft = generateCommunicationDraft({
-            draftType: payload.draftType || 'recruiter_reply',
-            job,
-            recruiterName: payload.recruiterName,
-            recruiterEmail: payload.recruiterEmail,
-            proposedSlots: payload.proposedSlots || [],
-            interviewDetails: payload.interviewDetails,
-            customContext: payload.customContext
-          });
+      try {
+        const db = getDatabase();
+        const job = body.jobId ? db.prepare('SELECT * FROM jobs WHERE id = ?').get(body.jobId) : null;
 
-          const saved = saveDraftToVault({
-            jobId: payload.jobId || null,
-            recipient: payload.recruiterEmail || '',
-            subject: draft.subject,
-            body: draft.body,
-            draftType: payload.draftType || 'recruiter_reply'
-          });
+        const draft = generateCommunicationDraft({
+          draftType: body.draftType || 'recruiter_reply',
+          job,
+          recruiterName: body.recruiterName,
+          recruiterEmail: body.recruiterEmail,
+          proposedSlots: body.proposedSlots || [],
+          interviewDetails: body.interviewDetails,
+          customContext: body.customContext
+        });
 
-          sendJson(200, {
-            success: true,
-            draftId: saved.draftId,
-            draft
-          });
-        } catch (e) {
-          sendJson(400, { error: e.message });
-        }
-      });
+        const saved = saveDraftToVault({
+          jobId: body.jobId || null,
+          recipient: body.recruiterEmail || '',
+          subject: draft.subject,
+          body: draft.body,
+          draftType: body.draftType || 'recruiter_reply'
+        });
+
+        sendJson(200, { success: true, draftId: saved.draftId, draft });
+      } catch (e) {
+        sendJson(400, { error: e.message });
+      }
       return;
     }
 
-    // 12. Communications: Approve Draft
+    // POST /api/communications/draft/:id/approve
     if (pathname.startsWith('/api/communications/draft/') && pathname.endsWith('/approve') && req.method === 'POST') {
-      const draftId = parseInt(pathname.split('/')[4], 10);
-      let body = '';
-      req.on('data', chunk => { body += chunk; });
-      req.on('end', async () => {
-        try {
-          const payload = body ? JSON.parse(body) : {};
-          const result = await approveAndPublishDraft(draftId, {
-            userConfirmedApproval: Boolean(payload.userConfirmedApproval)
-          });
-          sendJson(200, result);
-        } catch (e) {
-          sendJson(e.code === 'APPROVAL_REQUIRED' ? 400 : 500, { error: e.message, code: e.code });
-        }
-      });
+      const body = await safeReadBody();
+      if (body === null) return;
+
+      try {
+        const draftId = parseValidId(pathname.split('/')[4], 'Draft ID');
+        const result = await approveAndPublishDraft(draftId, {
+          userConfirmedApproval: Boolean(body.userConfirmedApproval)
+        });
+        sendJson(200, result);
+      } catch (e) {
+        sendJson(e.code === 'APPROVAL_REQUIRED' ? 400 : 500, { error: e.message, code: e.code });
+      }
       return;
     }
 
-    // 13. Calendar: List Events
+    // GET /api/calendar/events
     if (pathname === '/api/calendar/events' && req.method === 'GET') {
       try {
         const status = parsedUrl.searchParams.get('status') || null;
@@ -472,61 +650,55 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
       return;
     }
 
-    // 14. Calendar: Propose / Create Event
+    // POST /api/calendar/event
     if (pathname === '/api/calendar/event' && req.method === 'POST') {
-      let body = '';
-      req.on('data', chunk => { body += chunk; });
-      req.on('end', () => {
-        try {
-          const payload = JSON.parse(body);
-          const result = proposeCalendarEvent(payload);
-          sendJson(200, result);
-        } catch (e) {
-          sendJson(400, { error: e.message });
-        }
-      });
+      const body = await safeReadBody();
+      if (body === null) return;
+
+      try {
+        const result = proposeCalendarEvent(body);
+        sendJson(200, result);
+      } catch (e) {
+        sendJson(400, { error: e.message });
+      }
       return;
     }
 
-    // 15. Calendar: Approve Event
+    // POST /api/calendar/event/:id/approve
     if (pathname.startsWith('/api/calendar/event/') && pathname.endsWith('/approve') && req.method === 'POST') {
-      const eventId = parseInt(pathname.split('/')[4], 10);
-      let body = '';
-      req.on('data', chunk => { body += chunk; });
-      req.on('end', async () => {
-        try {
-          const payload = body ? JSON.parse(body) : {};
-          const result = await approveAndCreateCalendarEvent(eventId, {
-            userConfirmed: Boolean(payload.userConfirmed)
-          });
-          sendJson(200, result);
-        } catch (e) {
-          sendJson(e.code === 'APPROVAL_REQUIRED' ? 400 : 500, { error: e.message, code: e.code });
-        }
-      });
+      const body = await safeReadBody();
+      if (body === null) return;
+
+      try {
+        const eventId = parseValidId(pathname.split('/')[4], 'Event ID');
+        const result = await approveAndCreateCalendarEvent(eventId, {
+          userConfirmed: Boolean(body.userConfirmed)
+        });
+        sendJson(200, result);
+      } catch (e) {
+        sendJson(e.code === 'APPROVAL_REQUIRED' ? 400 : 500, { error: e.message, code: e.code });
+      }
       return;
     }
 
-    // 16. Calendar: Cancel Event
+    // POST /api/calendar/event/:id/cancel
     if (pathname.startsWith('/api/calendar/event/') && pathname.endsWith('/cancel') && req.method === 'POST') {
-      const eventId = parseInt(pathname.split('/')[4], 10);
-      let body = '';
-      req.on('data', chunk => { body += chunk; });
-      req.on('end', async () => {
-        try {
-          const payload = body ? JSON.parse(body) : {};
-          const result = await cancelCalendarEvent(eventId, {
-            userConfirmed: Boolean(payload.userConfirmed)
-          });
-          sendJson(200, result);
-        } catch (e) {
-          sendJson(e.code === 'APPROVAL_REQUIRED' ? 400 : 500, { error: e.message, code: e.code });
-        }
-      });
+      const body = await safeReadBody();
+      if (body === null) return;
+
+      try {
+        const eventId = parseValidId(pathname.split('/')[4], 'Event ID');
+        const result = await cancelCalendarEvent(eventId, {
+          userConfirmed: Boolean(body.userConfirmed)
+        });
+        sendJson(200, result);
+      } catch (e) {
+        sendJson(e.code === 'APPROVAL_REQUIRED' ? 400 : 500, { error: e.message, code: e.code });
+      }
       return;
     }
 
-    // 17. Follow-up Reminders: List
+    // GET /api/reminders
     if (pathname === '/api/reminders' && req.method === 'GET') {
       try {
         const status = parsedUrl.searchParams.get('status') || 'pending';
@@ -538,40 +710,36 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
       return;
     }
 
-    // 18. Follow-up Reminders: Create
+    // POST /api/reminders
     if (pathname === '/api/reminders' && req.method === 'POST') {
-      let body = '';
-      req.on('data', chunk => { body += chunk; });
-      req.on('end', () => {
-        try {
-          const payload = JSON.parse(body);
-          const result = createFollowUpReminder(payload);
-          sendJson(200, result);
-        } catch (e) {
-          sendJson(400, { error: e.message });
-        }
-      });
+      const body = await safeReadBody();
+      if (body === null) return;
+
+      try {
+        const result = createFollowUpReminder(body);
+        sendJson(200, result);
+      } catch (e) {
+        sendJson(400, { error: e.message });
+      }
       return;
     }
 
-    // 19. Follow-up Reminders: Update Status
+    // POST /api/reminders/:id/status
     if (pathname.startsWith('/api/reminders/') && pathname.endsWith('/status') && req.method === 'POST') {
-      const reminderId = parseInt(pathname.split('/')[3], 10);
-      let body = '';
-      req.on('data', chunk => { body += chunk; });
-      req.on('end', () => {
-        try {
-          const { status } = JSON.parse(body);
-          const result = updateReminderStatus(reminderId, status);
-          sendJson(200, result);
-        } catch (e) {
-          sendJson(400, { error: e.message });
-        }
-      });
+      const body = await safeReadBody();
+      if (body === null) return;
+
+      try {
+        const reminderId = parseValidId(pathname.split('/')[3], 'Reminder ID');
+        const result = updateReminderStatus(reminderId, body.status);
+        sendJson(200, result);
+      } catch (e) {
+        sendJson(400, { error: e.message });
+      }
       return;
     }
 
-    // 20. Google OAuth Status, URL & Disconnect
+    // GET /api/oauth/status
     if (pathname === '/api/oauth/status' && req.method === 'GET') {
       try {
         const status = getOAuthStatus();
@@ -582,6 +750,7 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
       return;
     }
 
+    // GET /api/oauth/url
     if (pathname === '/api/oauth/url' && req.method === 'GET') {
       try {
         const authUrl = getGoogleAuthUrl();
@@ -592,9 +761,17 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
       return;
     }
 
+    // POST /api/oauth/disconnect (Strict Confirmation Gate)
     if (pathname === '/api/oauth/disconnect' && req.method === 'POST') {
+      const body = await safeReadBody();
+      if (body === null) return;
+
       try {
-        const result = await disconnectAccount();
+        if (!body.userConfirmed) {
+          sendJson(400, { error: 'User Confirmation Required: Disconnecting your Google OAuth account requires explicit confirmation (userConfirmed: true).' });
+          return;
+        }
+        const result = await disconnectAccount({ userConfirmed: true });
         sendJson(200, result);
       } catch (e) {
         sendJson(500, { error: e.message });
@@ -602,11 +779,7 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
       return;
     }
 
-    // ==========================================
-    // PHASE 5: CAREER INTELLIGENCE & GROWTH
-    // ==========================================
-
-    // 21. Skill Gap Analysis
+    // GET /api/intelligence/skill-gaps
     if (pathname === '/api/intelligence/skill-gaps' && req.method === 'GET') {
       try {
         const limit = parseInt(parsedUrl.searchParams.get('limit') || '50', 10);
@@ -618,7 +791,7 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
       return;
     }
 
-    // 22. Skill Roadmap List
+    // GET /api/intelligence/roadmap
     if (pathname === '/api/intelligence/roadmap' && req.method === 'GET') {
       try {
         const roadmap = getSkillRoadmap();
@@ -629,23 +802,25 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
       return;
     }
 
-    // 23. Update Skill Roadmap Item
+    // POST /api/intelligence/roadmap/item
     if (pathname === '/api/intelligence/roadmap/item' && req.method === 'POST') {
-      let body = '';
-      req.on('data', chunk => { body += chunk; });
-      req.on('end', () => {
-        try {
-          const payload = body ? JSON.parse(body) : {};
-          const updated = updateSkillRoadmapItem(payload.skillName, payload);
-          sendJson(200, { success: true, item: updated });
-        } catch (e) {
-          sendJson(400, { error: e.message });
+      const body = await safeReadBody();
+      if (body === null) return;
+
+      try {
+        if (!body.skillName) {
+          sendJson(400, { error: 'skillName is required' });
+          return;
         }
-      });
+        const updated = updateSkillRoadmapItem(body.skillName, body);
+        sendJson(200, { success: true, item: updated });
+      } catch (e) {
+        sendJson(400, { error: e.message });
+      }
       return;
     }
 
-    // 24. STAR Story Bank
+    // GET /api/intelligence/stories
     if (pathname === '/api/intelligence/stories' && req.method === 'GET') {
       try {
         const category = parsedUrl.searchParams.get('category');
@@ -665,72 +840,66 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
       return;
     }
 
-    // 25. Create or Update STAR Story
+    // POST /api/intelligence/stories
     if (pathname === '/api/intelligence/stories' && req.method === 'POST') {
-      let body = '';
-      req.on('data', chunk => { body += chunk; });
-      req.on('end', () => {
-        try {
-          const payload = body ? JSON.parse(body) : {};
-          const story = createOrUpdateStory(payload);
-          sendJson(200, { success: true, story });
-        } catch (e) {
-          sendJson(400, { error: e.message });
-        }
-      });
-      return;
-    }
+      const body = await safeReadBody();
+      if (body === null) return;
 
-    // 26. Targeted Interview Kit
-    if (pathname.startsWith('/api/intelligence/interview-prep/') && req.method === 'GET') {
-      const jobId = parseInt(pathname.split('/')[4], 10);
       try {
-        const db = getDatabase();
-        const job = jobId ? db.prepare('SELECT * FROM jobs WHERE id = ?').get(jobId) : null;
-        const kit = generateTargetedInterviewKit(job);
-        sendJson(200, { success: true, kit });
+        const story = createOrUpdateStory(body);
+        sendJson(200, { success: true, story });
       } catch (e) {
-        sendJson(500, { error: e.message });
+        sendJson(400, { error: e.message });
       }
       return;
     }
 
-    // 27. Start Mock Interview Session
+    // GET /api/intelligence/interview-prep/:id
+    if (pathname.startsWith('/api/intelligence/interview-prep/') && req.method === 'GET') {
+      try {
+        const jobId = parseValidId(pathname.split('/')[4], 'Job ID');
+        const db = getDatabase();
+        const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(jobId);
+        const kit = generateTargetedInterviewKit(job);
+        sendJson(200, { success: true, kit });
+      } catch (e) {
+        sendJson(e.statusCode || 500, { error: e.message });
+      }
+      return;
+    }
+
+    // POST /api/intelligence/mock/start
     if (pathname === '/api/intelligence/mock/start' && req.method === 'POST') {
-      let body = '';
-      req.on('data', chunk => { body += chunk; });
-      req.on('end', () => {
-        try {
-          const payload = body ? JSON.parse(body) : {};
-          const session = startMockInterview(payload);
-          sendJson(200, { success: true, session });
-        } catch (e) {
-          sendJson(400, { error: e.message });
-        }
-      });
+      const body = await safeReadBody();
+      if (body === null) return;
+
+      try {
+        const session = startMockInterview(body);
+        sendJson(200, { success: true, session });
+      } catch (e) {
+        sendJson(400, { error: e.message });
+      }
       return;
     }
 
-    // 28. Submit Mock Interview Answer
+    // POST /api/intelligence/mock/submit
     if (pathname === '/api/intelligence/mock/submit' && req.method === 'POST') {
-      let body = '';
-      req.on('data', chunk => { body += chunk; });
-      req.on('end', () => {
-        try {
-          const payload = body ? JSON.parse(body) : {};
-          const result = submitMockAnswer(payload);
-          sendJson(200, { success: true, result });
-        } catch (e) {
-          sendJson(400, { error: e.message });
-        }
-      });
+      const body = await safeReadBody();
+      if (body === null) return;
+
+      try {
+        const result = submitMockAnswer(body);
+        sendJson(200, { success: true, result });
+      } catch (e) {
+        sendJson(400, { error: e.message });
+      }
       return;
     }
 
-    // 29. Get Mock Interview Session History
+    // GET /api/intelligence/mock/history
     if (pathname === '/api/intelligence/mock/history' && req.method === 'GET') {
       try {
-        const limit = parseInt(parsedUrl.searchParams.get('limit') || '10', 10);
+        const limit = Math.min(parseInt(parsedUrl.searchParams.get('limit') || '10', 10), 100);
         const history = getMockHistory({ limit });
         sendJson(200, { success: true, history });
       } catch (e) {
@@ -739,10 +908,10 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
       return;
     }
 
-    // 30. Get Mock Interview Session by ID
+    // GET /api/intelligence/mock/:id
     if (pathname.startsWith('/api/intelligence/mock/') && req.method === 'GET') {
-      const sessionId = parseInt(pathname.split('/')[4], 10);
       try {
+        const sessionId = parseValidId(pathname.split('/')[4], 'Session ID');
         const session = getMockSession(sessionId);
         if (!session) {
           sendJson(404, { error: `Session #${sessionId} not found.` });
@@ -750,12 +919,12 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
         }
         sendJson(200, { success: true, session });
       } catch (e) {
-        sendJson(500, { error: e.message });
+        sendJson(e.statusCode || 500, { error: e.message });
       }
       return;
     }
 
-    // 31. Application Funnel & Conversion Analytics
+    // GET /api/intelligence/analytics
     if (pathname === '/api/intelligence/analytics' && req.method === 'GET') {
       try {
         const analytics = getApplicationAnalytics();
@@ -766,7 +935,7 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
       return;
     }
 
-    // 32. Rejection Pattern Analysis
+    // GET /api/intelligence/rejections
     if (pathname === '/api/intelligence/rejections' && req.method === 'GET') {
       try {
         const rejections = getRejectionAnalysis();
@@ -777,10 +946,14 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
       return;
     }
 
-    // 33. Company & Recruiter Research
+    // GET /api/intelligence/company/:name
     if (pathname.startsWith('/api/intelligence/company/') && req.method === 'GET') {
-      const companyName = decodeURIComponent(pathname.split('/')[4]);
       try {
+        const companyName = decodeURIComponent(pathname.split('/')[4] || '');
+        if (!companyName) {
+          sendJson(400, { error: 'Company name is required.' });
+          return;
+        }
         const research = getCompanyResearch(companyName);
         sendJson(200, { success: true, research });
       } catch (e) {
@@ -789,55 +962,49 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
       return;
     }
 
-    // 34. Salary Calculator (Take-Home Pay Estimate)
+    // POST /api/intelligence/salary/calculate
     if (pathname === '/api/intelligence/salary/calculate' && req.method === 'POST') {
-      let body = '';
-      req.on('data', chunk => { body += chunk; });
-      req.on('end', () => {
-        try {
-          const payload = body ? JSON.parse(body) : {};
-          const calculation = calculateOfferTakeHome(payload);
-          sendJson(200, { success: true, calculation });
-        } catch (e) {
-          sendJson(400, { error: e.message });
-        }
-      });
+      const body = await safeReadBody();
+      if (body === null) return;
+
+      try {
+        const calculation = calculateOfferTakeHome(body);
+        sendJson(200, { success: true, calculation });
+      } catch (e) {
+        sendJson(400, { error: e.message });
+      }
       return;
     }
 
-    // 35. Compare Multiple Offers
+    // POST /api/intelligence/salary/compare
     if (pathname === '/api/intelligence/salary/compare' && req.method === 'POST') {
-      let body = '';
-      req.on('data', chunk => { body += chunk; });
-      req.on('end', () => {
-        try {
-          const payload = body ? JSON.parse(body) : {};
-          const comparison = compareOffers(payload.offers || []);
-          sendJson(200, { success: true, comparison });
-        } catch (e) {
-          sendJson(400, { error: e.message });
-        }
-      });
+      const body = await safeReadBody();
+      if (body === null) return;
+
+      try {
+        const comparison = compareOffers(body.offers || []);
+        sendJson(200, { success: true, comparison });
+      } catch (e) {
+        sendJson(400, { error: e.message });
+      }
       return;
     }
 
-    // 36. Save Offer Record
+    // POST /api/intelligence/salary/save
     if (pathname === '/api/intelligence/salary/save' && req.method === 'POST') {
-      let body = '';
-      req.on('data', chunk => { body += chunk; });
-      req.on('end', () => {
-        try {
-          const payload = body ? JSON.parse(body) : {};
-          const saved = saveOfferComparisonRecord(payload);
-          sendJson(200, { success: true, offer: saved });
-        } catch (e) {
-          sendJson(400, { error: e.message });
-        }
-      });
+      const body = await safeReadBody();
+      if (body === null) return;
+
+      try {
+        const saved = saveOfferComparisonRecord(body);
+        sendJson(200, { success: true, offer: saved });
+      } catch (e) {
+        sendJson(400, { error: e.message });
+      }
       return;
     }
 
-    // 37. Get Saved Offers
+    // GET /api/intelligence/salary/saved
     if (pathname === '/api/intelligence/salary/saved' && req.method === 'GET') {
       try {
         const offers = getSavedOfferComparisons();
@@ -848,10 +1015,10 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
       return;
     }
 
-    // 4. Generate Interview Prep Dossier
+    // GET /api/job/:id/prep
     if (pathname.startsWith('/api/job/') && pathname.endsWith('/prep') && req.method === 'GET') {
-      const jobId = parseInt(pathname.split('/')[3], 10);
       try {
+        const jobId = parseValidId(pathname.split('/')[3], 'Job ID');
         const db = getDatabase();
         const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(jobId);
         if (!job) {
@@ -862,51 +1029,49 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
         const dossier = generateInterviewDossier(job);
         sendJson(200, { success: true, dossier });
       } catch (e) {
+        sendJson(e.statusCode || 500, { error: e.message });
+      }
+      return;
+    }
+
+    // POST /api/job/:id/referral
+    if (pathname.startsWith('/api/job/') && pathname.endsWith('/referral') && req.method === 'POST') {
+      const body = await safeReadBody();
+      if (body === null) return;
+
+      try {
+        const jobId = parseValidId(pathname.split('/')[3], 'Job ID');
+        const db = getDatabase();
+        const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(jobId);
+        if (!job) {
+          sendJson(404, { error: `Job with ID ${jobId} not found` });
+          return;
+        }
+        const { recipientType = 'engineer', recipientName = 'Hi' } = body;
+        const msg = generateReferralMessage(job, recipientType, recipientName);
+        sendJson(200, { success: true, referral: msg });
+      } catch (e) {
+        sendJson(e.statusCode || 400, { error: e.message });
+      }
+      return;
+    }
+
+    // POST /api/verify-links
+    if (pathname === '/api/verify-links' && req.method === 'POST') {
+      const body = await safeReadBody();
+      if (body === null) return;
+
+      try {
+        const limit = Math.min(Number(body.limit) || 15, 50);
+        const result = await verifyVaultJobs({ limit });
+        sendJson(200, { success: true, ...result });
+      } catch (e) {
         sendJson(500, { error: e.message });
       }
       return;
     }
 
-    // 5. Generate Referral Outreach Message
-    if (pathname.startsWith('/api/job/') && pathname.endsWith('/referral') && req.method === 'POST') {
-      const jobId = parseInt(pathname.split('/')[3], 10);
-      let body = '';
-      req.on('data', chunk => { body += chunk; });
-      req.on('end', () => {
-        try {
-          const db = getDatabase();
-          const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(jobId);
-          if (!job) {
-            sendJson(404, { error: `Job with ID ${jobId} not found` });
-            return;
-          }
-          const { recipientType = 'engineer', recipientName = 'Hi' } = body ? JSON.parse(body) : {};
-          const msg = generateReferralMessage(job, recipientType, recipientName);
-          sendJson(200, { success: true, referral: msg });
-        } catch (e) {
-          sendJson(400, { error: e.message });
-        }
-      });
-      return;
-    }
-
-    // 6. Verify Job Links / Ghost Job Audit
-    if (pathname === '/api/verify-links' && req.method === 'POST') {
-      let body = '';
-      req.on('data', chunk => { body += chunk; });
-      req.on('end', async () => {
-        try {
-          const { limit = 15 } = body ? JSON.parse(body) : {};
-          const result = await verifyVaultJobs({ limit });
-          sendJson(200, { success: true, ...result });
-        } catch (e) {
-          sendJson(500, { error: e.message });
-        }
-      });
-      return;
-    }
-
-    // 7. Export Pipeline to CSV
+    // GET /api/export/csv
     if (pathname === '/api/export/csv' && req.method === 'GET') {
       try {
         const { csvPath } = exportVaultToCsv();
@@ -921,7 +1086,7 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
       return;
     }
 
-    // 8. Export Pipeline to JSON
+    // GET /api/export/json
     if (pathname === '/api/export/json' && req.method === 'GET') {
       try {
         const { jsonPath } = exportVaultToJson();
@@ -936,44 +1101,40 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
       return;
     }
 
-    // 9. Interactive Mock Interview Answer Evaluation
+    // POST /api/mock/evaluate
     if (pathname === '/api/mock/evaluate' && req.method === 'POST') {
-      let body = '';
-      req.on('data', chunk => { body += chunk; });
-      req.on('end', () => {
-        try {
-          const { question, answer, topic = 'general' } = JSON.parse(body);
-          const evalResult = evaluateCandidateAnswer(question, answer, topic);
-          sendJson(200, { success: true, evalResult });
-        } catch (e) {
-          sendJson(400, { error: e.message });
-        }
-      });
-      return;
-    }
+      const body = await safeReadBody();
+      if (body === null) return;
 
-    // 10. Save Mock Interview Session
-    if (pathname === '/api/mock/save' && req.method === 'POST') {
-      let body = '';
-      req.on('data', chunk => { body += chunk; });
-      req.on('end', () => {
-        try {
-          const { jobId, round, feedbackJson } = JSON.parse(body);
-          const session = saveInterviewSession(jobId, round, feedbackJson);
-          sendJson(200, { success: true, session });
-        } catch (e) {
-          sendJson(400, { error: e.message });
-        }
-      });
-      return;
-    }
-
-    // --- RESUME STUDIO API ENDPOINTS ---
-
-    // 11. Get Studio Data for a Job (JD Analysis, Versions, Initial Tailored Draft)
-    if (pathname.startsWith('/api/resume/studio-data/') && req.method === 'GET') {
-      const jobId = parseInt(pathname.split('/')[4], 10);
       try {
+        const { question, answer, topic = 'general' } = body;
+        const evalResult = evaluateCandidateAnswer(question, answer, topic);
+        sendJson(200, { success: true, evalResult });
+      } catch (e) {
+        sendJson(400, { error: e.message });
+      }
+      return;
+    }
+
+    // POST /api/mock/save
+    if (pathname === '/api/mock/save' && req.method === 'POST') {
+      const body = await safeReadBody();
+      if (body === null) return;
+
+      try {
+        const { jobId, round, feedbackJson } = body;
+        const session = saveInterviewSession(jobId, round, feedbackJson);
+        sendJson(200, { success: true, session });
+      } catch (e) {
+        sendJson(400, { error: e.message });
+      }
+      return;
+    }
+
+    // GET /api/resume/studio-data/:id
+    if (pathname.startsWith('/api/resume/studio-data/') && req.method === 'GET') {
+      try {
+        const jobId = parseValidId(pathname.split('/')[4], 'Job ID');
         const db = getDatabase();
         const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(jobId);
         if (!job) {
@@ -985,91 +1146,82 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
         const versions = getResumeVersionsForJob(jobId);
         const initialStudio = await generateStudioResume(job, { jdAnalysis });
 
-        sendJson(200, {
-          success: true,
-          job,
-          jdAnalysis,
-          versions,
-          initialStudio
-        });
+        sendJson(200, { success: true, job, jdAnalysis, versions, initialStudio });
       } catch (e) {
-        sendJson(500, { error: e.message });
+        sendJson(e.statusCode || 500, { error: e.message });
       }
       return;
     }
 
-    // 12. Recalculate ATS Score on Edited Content
+    // POST /api/resume/score
     if (pathname === '/api/resume/score' && req.method === 'POST') {
-      let body = '';
-      req.on('data', chunk => { body += chunk; });
-      req.on('end', () => {
-        try {
-          const { jdAnalysis, resumeContent } = JSON.parse(body);
-          const scoreResult = calculateAtsScore(jdAnalysis, resumeContent);
-          sendJson(200, { success: true, atsScore: scoreResult });
-        } catch (e) {
-          sendJson(400, { error: e.message });
-        }
-      });
-      return;
-    }
+      const body = await safeReadBody();
+      if (body === null) return;
 
-    // 13. Generate/Re-generate Tailored Resume with Template
-    if (pathname === '/api/resume/generate' && req.method === 'POST') {
-      let body = '';
-      req.on('data', chunk => { body += chunk; });
-      req.on('end', async () => {
-        try {
-          const { jobId, template = 'ats_professional', forceAi = false } = JSON.parse(body);
-          const db = getDatabase();
-          const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(jobId);
-          if (!job) {
-            sendJson(404, { error: `Job #${jobId} not found` });
-            return;
-          }
-
-          const result = await generateStudioResume(job, { template, forceAi });
-          sendJson(200, { success: true, result });
-        } catch (e) {
-          sendJson(500, { error: e.message });
-        }
-      });
-      return;
-    }
-
-    // 14. Save Resume Version
-    if (pathname === '/api/resume/save' && req.method === 'POST') {
-      let body = '';
-      req.on('data', chunk => { body += chunk; });
-      req.on('end', async () => {
-        try {
-          const data = JSON.parse(body);
-          const savedVersion = await saveResumeVersion(data);
-          sendJson(200, { success: true, version: savedVersion });
-        } catch (e) {
-          const status = e.statusCode || 500;
-          sendJson(status, { success: false, error: e.message, audit: e.audit || null });
-        }
-      });
-      return;
-    }
-
-    // 15. Get All Versions for a Job
-    if (pathname.startsWith('/api/resume/versions/') && req.method === 'GET') {
-      const jobId = parseInt(pathname.split('/')[4], 10);
       try {
+        const { jdAnalysis, resumeContent } = body;
+        const scoreResult = calculateAtsScore(jdAnalysis, resumeContent);
+        sendJson(200, { success: true, atsScore: scoreResult });
+      } catch (e) {
+        sendJson(400, { error: e.message });
+      }
+      return;
+    }
+
+    // POST /api/resume/generate
+    if (pathname === '/api/resume/generate' && req.method === 'POST') {
+      const body = await safeReadBody();
+      if (body === null) return;
+
+      try {
+        const { jobId, template = 'ats_professional', forceAi = false } = body;
+        const validJobId = parseValidId(jobId, 'jobId');
+        const db = getDatabase();
+        const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(validJobId);
+        if (!job) {
+          sendJson(404, { error: `Job #${validJobId} not found` });
+          return;
+        }
+
+        const result = await generateStudioResume(job, { template, forceAi });
+        sendJson(200, { success: true, result });
+      } catch (e) {
+        sendJson(e.statusCode || 500, { error: e.message });
+      }
+      return;
+    }
+
+    // POST /api/resume/save
+    if (pathname === '/api/resume/save' && req.method === 'POST') {
+      const body = await safeReadBody();
+      if (body === null) return;
+
+      try {
+        const savedVersion = await saveResumeVersion(body);
+        sendJson(200, { success: true, version: savedVersion });
+      } catch (e) {
+        const status = e.statusCode || 500;
+        sendJson(status, { success: false, error: e.message, audit: e.audit || null });
+      }
+      return;
+    }
+
+    // GET /api/resume/versions/:id
+    if (pathname.startsWith('/api/resume/versions/') && req.method === 'GET') {
+      try {
+        const jobId = parseValidId(pathname.split('/')[4], 'Job ID');
         const versions = getResumeVersionsForJob(jobId);
         sendJson(200, { success: true, versions });
       } catch (e) {
-        sendJson(500, { error: e.message });
+        sendJson(e.statusCode || 500, { error: e.message });
       }
       return;
     }
 
-    // 16. Approve Resume Version (Link to Tracker)
+    // POST /api/resume/approve/:id
     if (pathname.startsWith('/api/resume/approve/') && req.method === 'POST') {
-      const versionId = parseInt(pathname.split('/')[4], 10);
       try {
+        const versionId = parseValidId(pathname.split('/')[4], 'Version ID');
         const version = await approveResumeVersion(versionId);
         sendJson(200, { success: true, version });
       } catch (e) {
@@ -1079,34 +1231,34 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
       return;
     }
 
-    // 17. Delete Resume Version
+    // DELETE /api/resume/version/:id
     if (pathname.startsWith('/api/resume/version/') && req.method === 'DELETE') {
-      const versionId = parseInt(pathname.split('/')[4], 10);
       try {
+        const versionId = parseValidId(pathname.split('/')[4], 'Version ID');
         const resDel = deleteResumeVersion(versionId);
         sendJson(200, { success: true, ...resDel });
       } catch (e) {
-        sendJson(500, { error: e.message });
+        sendJson(e.statusCode || 500, { error: e.message });
       }
       return;
     }
 
-    // 18. Duplicate Resume Version
+    // POST /api/resume/duplicate/:id
     if (pathname.startsWith('/api/resume/duplicate/') && req.method === 'POST') {
-      const versionId = parseInt(pathname.split('/')[4], 10);
       try {
+        const versionId = parseValidId(pathname.split('/')[4], 'Version ID');
         const dup = await duplicateResumeVersion(versionId);
         sendJson(200, { success: true, version: dup });
       } catch (e) {
-        sendJson(500, { error: e.message });
+        sendJson(e.statusCode || 500, { error: e.message });
       }
       return;
     }
 
-    // 19. Download Resume PDF
+    // GET /api/resume/download/:id/pdf (with Path Traversal Guard)
     if (pathname.startsWith('/api/resume/download/') && pathname.endsWith('/pdf') && req.method === 'GET') {
-      const versionId = parseInt(pathname.split('/')[4], 10);
       try {
+        const versionId = parseValidId(pathname.split('/')[4], 'Version ID');
         const version = getResumeVersionById(versionId);
         if (!version) {
           sendJson(404, { error: `Version #${versionId} not found` });
@@ -1114,11 +1266,17 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
         }
 
         let pdfPath = version.pdf_path;
+        const resumesDir = path.resolve(OUTPUT_DIR, 'resumes');
         if (!pdfPath || !fs.existsSync(pdfPath)) {
-          // Compile on the fly
           const html = renderResumeHtml(version.content, version.template);
-          pdfPath = path.join(OUTPUT_DIR, 'resumes', `${version.job_id}_v${version.version_number}_Resume.pdf`);
+          pdfPath = path.resolve(resumesDir, `${version.job_id}_v${version.version_number}_Resume.pdf`);
           await exportToPdf(html, pdfPath);
+        }
+
+        const resolvedPdf = path.resolve(pdfPath);
+        if (!resolvedPdf.startsWith(resumesDir)) {
+          sendJson(403, { error: 'Access Denied: Path outside allowed directory.' });
+          return;
         }
 
         const safeFilename = `${(version.company || 'Company').replace(/[^a-zA-Z0-9]/g, '_')}_Abhishek_N_Resume_v${version.version_number}.pdf`;
@@ -1126,17 +1284,17 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
           'Content-Type': 'application/pdf',
           'Content-Disposition': `attachment; filename="${safeFilename}"`
         });
-        fs.createReadStream(pdfPath).pipe(res);
+        fs.createReadStream(resolvedPdf).pipe(res);
       } catch (e) {
-        sendJson(500, { error: e.message });
+        sendJson(e.statusCode || 500, { error: e.message });
       }
       return;
     }
 
-    // 20. Download Resume DOCX
+    // GET /api/resume/download/:id/docx (with Path Traversal Guard)
     if (pathname.startsWith('/api/resume/download/') && pathname.endsWith('/docx') && req.method === 'GET') {
-      const versionId = parseInt(pathname.split('/')[4], 10);
       try {
+        const versionId = parseValidId(pathname.split('/')[4], 'Version ID');
         const version = getResumeVersionById(versionId);
         if (!version) {
           sendJson(404, { error: `Version #${versionId} not found` });
@@ -1144,9 +1302,16 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
         }
 
         let docxPath = version.docx_path;
+        const resumesDir = path.resolve(OUTPUT_DIR, 'resumes');
         if (!docxPath || !fs.existsSync(docxPath)) {
-          docxPath = path.join(OUTPUT_DIR, 'resumes', `${version.job_id}_v${version.version_number}_Resume.docx`);
+          docxPath = path.resolve(resumesDir, `${version.job_id}_v${version.version_number}_Resume.docx`);
           await exportToDocx(version.content, docxPath);
+        }
+
+        const resolvedDocx = path.resolve(docxPath);
+        if (!resolvedDocx.startsWith(resumesDir)) {
+          sendJson(403, { error: 'Access Denied: Path outside allowed directory.' });
+          return;
         }
 
         const safeFilename = `${(version.company || 'Company').replace(/[^a-zA-Z0-9]/g, '_')}_Abhishek_N_Resume_v${version.version_number}.docx`;
@@ -1154,16 +1319,12 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
           'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
           'Content-Disposition': `attachment; filename="${safeFilename}"`
         });
-        fs.createReadStream(docxPath).pipe(res);
+        fs.createReadStream(resolvedDocx).pipe(res);
       } catch (e) {
-        sendJson(500, { error: e.message });
+        sendJson(e.statusCode || 500, { error: e.message });
       }
       return;
     }
-
-    // ==========================================
-    // PHASE 6: AUTOMATION ENGINE & CONTROL CENTER
-    // ==========================================
 
     // GET /api/automation/status
     if (req.method === 'GET' && pathname === '/api/automation/status') {
@@ -1195,10 +1356,12 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
 
     // POST /api/automation/task/:taskKey/toggle
     if (req.method === 'POST' && pathname.startsWith('/api/automation/task/') && pathname.endsWith('/toggle')) {
+      const body = await safeReadBody();
+      if (body === null) return;
+
       try {
         const parts = pathname.split('/');
         const taskKey = parts[4];
-        const body = await parseBody();
         const updated = toggleTaskEnabled(taskKey, body.enabled !== undefined ? body.enabled : undefined);
         sendJson(200, { success: true, task: updated });
       } catch (e) {
@@ -1209,10 +1372,12 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
 
     // POST /api/automation/task/:taskKey/interval
     if (req.method === 'POST' && pathname.startsWith('/api/automation/task/') && pathname.endsWith('/interval')) {
+      const body = await safeReadBody();
+      if (body === null) return;
+
       try {
         const parts = pathname.split('/');
         const taskKey = parts[4];
-        const body = await parseBody();
         const updated = updateTaskInterval(taskKey, body.intervalMinutes);
         sendJson(200, { success: true, task: updated });
       } catch (e) {
@@ -1223,8 +1388,10 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
 
     // POST /api/automation/master-toggle
     if (req.method === 'POST' && pathname === '/api/automation/master-toggle') {
+      const body = await safeReadBody();
+      if (body === null) return;
+
       try {
-        const body = await parseBody();
         const paused = setMasterAutomationPause(body.paused);
         sendJson(200, { success: true, isPaused: paused });
       } catch (e) {
@@ -1232,10 +1399,6 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
       }
       return;
     }
-
-    // ==========================================
-    // PHASE 6: LOCAL-FIRST BACKUP & DATA RECOVERY
-    // ==========================================
 
     // GET /api/backup/list
     if (req.method === 'GET' && pathname === '/api/backup/list') {
@@ -1250,8 +1413,10 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
 
     // POST /api/backup/create
     if (req.method === 'POST' && pathname === '/api/backup/create') {
+      const body = await safeReadBody();
+      if (body === null) return;
+
       try {
-        const body = await parseBody();
         const backupResult = backupDatabase({ label: body.label || 'manual' });
         sendJson(200, { success: true, backup: backupResult });
       } catch (e) {
@@ -1260,21 +1425,29 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
       return;
     }
 
-    // POST /api/backup/restore
+    // POST /api/backup/restore (Strict User Confirmation Gate)
     if (req.method === 'POST' && pathname === '/api/backup/restore') {
+      const body = await safeReadBody();
+      if (body === null) return;
+
       try {
-        const body = await parseBody();
         if (!body.backupPath) {
           sendJson(400, { error: 'backupPath is required' });
           return;
         }
-        const restoreResult = restoreDatabase({
-          backupPath: body.backupPath,
-          userConfirmed: body.userConfirmed === true
+        if (body.userConfirmed !== true) {
+          sendJson(400, {
+            error: 'Destructive Action Protection: You must explicitly confirm database restoration (userConfirmed: true).'
+          });
+          return;
+        }
+
+        const restoreResult = restoreDatabase(body.backupPath, {
+          userConfirmed: true
         });
         sendJson(200, { success: true, result: restoreResult });
       } catch (e) {
-        sendJson(500, { error: e.message });
+        sendJson(400, { error: e.message });
       }
       return;
     }
@@ -1301,9 +1474,20 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
       return;
     }
 
-    // Static File Serving
-    let filePath = path.join(PUBLIC_DIR, pathname === '/' ? 'index.html' : pathname);
-    const ext = path.extname(filePath);
+    // ==========================================
+    // STATIC FILE SERVING WITH PATH TRAVERSAL GUARD
+    // ==========================================
+    const safePath = path.normalize(pathname).replace(/^(\.\.[/\\])+/, '');
+    const fileName = safePath === '/' || safePath === '' ? 'index.html' : safePath;
+    const resolvedStaticPath = path.resolve(PUBLIC_DIR, fileName.replace(/^[/\\]+/, ''));
+
+    if (!resolvedStaticPath.startsWith(path.resolve(PUBLIC_DIR))) {
+      res.writeHead(403, { 'Content-Type': 'text/plain' });
+      res.end('Access Denied');
+      return;
+    }
+
+    const ext = path.extname(resolvedStaticPath);
     const mimeTypes = {
       '.html': 'text/html',
       '.js': 'text/javascript',
@@ -1313,9 +1497,9 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
       '.png': 'image/png'
     };
 
-    if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+    if (fs.existsSync(resolvedStaticPath) && fs.statSync(resolvedStaticPath).isFile()) {
       res.writeHead(200, { 'Content-Type': mimeTypes[ext] || 'text/plain' });
-      fs.createReadStream(filePath).pipe(res);
+      fs.createReadStream(resolvedStaticPath).pipe(res);
     } else {
       res.writeHead(404, { 'Content-Type': 'text/plain' });
       res.end('Not Found');

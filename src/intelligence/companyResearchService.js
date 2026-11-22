@@ -17,8 +17,9 @@ export function getCompanyResearch(companyName, job = null) {
   // Synthesize research from active vault jobs, communications, and legitimate company data
   const vaultJobs = db.prepare('SELECT * FROM jobs WHERE LOWER(company) LIKE LOWER(?)').all(`%${cleanName}%`);
   const activeJob = job || vaultJobs[0] || null;
+  const hasRealJobData = vaultJobs.length > 0 || Boolean(activeJob);
 
-  // Extract combined tech stack across company JDs
+  // Extract combined tech stack across company JDs (no arbitrary fabrication)
   const techStackSet = new Set();
   vaultJobs.forEach(j => {
     let reqs = [];
@@ -34,13 +35,6 @@ export function getCompanyResearch(companyName, job = null) {
       if (desc.includes(k)) techStackSet.add(k.toUpperCase());
     });
   });
-
-  if (techStackSet.size === 0) {
-    techStackSet.add('Java');
-    techStackSet.add('Spring Boot');
-    techStackSet.add('React');
-    techStackSet.add('SQL');
-  }
 
   // Check for verified recruiter communications in local communications table
   const comm = db.prepare(`
@@ -72,8 +66,17 @@ export function getCompanyResearch(companyName, job = null) {
     careerUrl = activeJob.canonical_url;
   }
 
-  const overview = `${cleanName} is a technology organization hiring software engineering talent in India. Target opportunities focus on modern application development and backend services.`;
-  const products = `Core business services, enterprise software platforms, and digital client solutions in technology and consulting.`;
+  const isPlaceholder = !hasRealJobData;
+  let overview;
+  let products;
+
+  if (hasRealJobData) {
+    overview = `${cleanName} is actively hiring software engineering talent in India based on listings in Career Vault. Focus areas include modern application engineering and backend development.`;
+    products = `Enterprise software services and digital solutions as identified in verified job requirements.`;
+  } else {
+    overview = `Unverified placeholder profile for ${cleanName}. No verified job postings or official records found in local database.`;
+    products = `Unverified company information. Pending verified corporate sources.`;
+  }
   
   const interviewNotes = [
     'Round 1: Online Technical Assessment (Core Java/DSA, SQL queries, and basic aptitude).',
@@ -81,6 +84,14 @@ export function getCompanyResearch(companyName, job = null) {
     'Round 3: Project Architecture Review (Deep-dive into capstone projects like NearVia, handling concurrency, PostGIS spatial queries, and REST APIs).',
     'Round 4: HR / Cultural Fit (Discussion of career goals, Bengaluru work location / hybrid preferences, and MCA 2026 graduation readiness).'
   ].join('\n');
+
+  // Determine verified_status honestly:
+  // - 'community_reported' if grounded in actual local vault jobs
+  // - 'unverified' if purely generic placeholder
+  let verifiedStatus = 'unverified';
+  if (hasRealJobData) {
+    verifiedStatus = 'community_reported';
+  }
 
   // Insert into company_research table
   const insert = db.prepare(`
@@ -97,14 +108,14 @@ export function getCompanyResearch(companyName, job = null) {
     interviewNotes,
     careerUrl,
     JSON.stringify(recruiterInfo),
-    recruiterInfo ? 'verified_official' : 'community_reported'
+    verifiedStatus
   );
 
   const row = db.prepare('SELECT * FROM company_research WHERE LOWER(company_name) = LOWER(?)').get(cleanName);
-  return formatCompanyResearchRow(row);
+  return formatCompanyResearchRow(row, isPlaceholder);
 }
 
-function formatCompanyResearchRow(row) {
+function formatCompanyResearchRow(row, isPlaceholder = null) {
   let techStack = [];
   try {
     techStack = row.tech_stack_json ? JSON.parse(row.tech_stack_json) : [];
@@ -119,6 +130,8 @@ function formatCompanyResearchRow(row) {
     recruiterInfo = null;
   }
 
+  const isGeneric = isPlaceholder !== null ? isPlaceholder : (row.verified_status === 'unverified' || (row.overview || '').includes('Unverified placeholder'));
+
   return {
     id: row.id,
     companyName: row.company_name,
@@ -129,10 +142,17 @@ function formatCompanyResearchRow(row) {
     careerPageUrl: row.career_page_url,
     recruiterInfo,
     verifiedStatus: row.verified_status,
+    isGenericPlaceholder: isGeneric,
     verificationGuide: {
-      companyDetails: 'community_reported (Aggregated from active job descriptions and public company data)',
-      interviewExperiences: 'community_reported (Standard industry interview pattern for entry-level roles)',
-      recruiterDetails: recruiterInfo ? 'verified_official (Extracted from direct recruiter email communication)' : 'unverified (No direct recruiter communication synchronized)'
+      companyDetails: isGeneric
+        ? 'unverified (Generic placeholder template; no verified company profile available)'
+        : 'community_reported (Aggregated from active job descriptions and public company data)',
+      interviewExperiences: isGeneric
+        ? 'unverified (Standard industry template; not specific to company)'
+        : 'community_reported (Standard industry interview pattern for entry-level roles)',
+      recruiterDetails: recruiterInfo
+        ? 'verified_official (Extracted from direct recruiter email communication)'
+        : 'unverified (No direct recruiter communication synchronized)'
     },
     updatedAt: row.updated_at
   };

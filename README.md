@@ -137,7 +137,7 @@ node src/cli.js db-check
 # 28. Export full candidate career data archive to JSON
 node src/cli.js export-archive
 
-# 29. Run the complete automated test suite (79 tests across 17 suites)
+# 29. Run the complete automated test suite (90 tests across 18 suites)
 npm test
 ```
 
@@ -172,12 +172,12 @@ npm test
     * **SmartRecruiters (`jobs.smartrecruiters.com` — Supported):** Pre-fills first/last names, contact details, city, and attaches PDF resume on public postings.
     * **Workday (`*.myworkdayjobs.com` — Partially Supported):** Detects candidate account creation and login walls; fills public text inputs when available; guides candidate with structured side-panel manual assist.
     * **Generic ATS / Custom Career Pages (Partially Supported):** Heuristic selector mapping for arbitrary HTML career pages with automated session-expiry and CAPTCHA challenge detection.
-13. **Screening Answer Intelligence Engine (`src/automation/screeningEngine.js`):** Generates transparent screening answers derived strictly from verified facts in `data/candidate_profile.json` (India work authorization, 1 year Java/Spring Boot experience from Anudip Foundation & Leave Management, MCA 2026 / BCA 2024 from AIMS Institutes, immediate availability, Bengaluru location). Unsupported questions (e.g. 7+ years experience or unverified cloud certs) are strictly flagged (`confidence: 'unsupported'`, `requiresUserInput: true`) without fabrication. An automated `validateAnswerTruthfulness` validator rejects inflated claims.
+13. **Screening Answer Intelligence Engine (`src/automation/screeningEngine.js`):** Generates transparent screening answers derived strictly from verified facts in `data/candidate_profile.json` (India work authorization, fresher entry-level status with hands-on Java/Spring Boot experience from Anudip Foundation internship & Leave Management project, MCA 2026 / BCA 2024 from AIMS Institutes, immediate availability, Bengaluru location). Unsupported questions (e.g. 7+ years experience or unverified cloud certs) are strictly flagged (`confidence: 'unsupported'`, `requiresUserInput: true`) without fabrication. An automated `validateAnswerTruthfulness` validator rejects inflated claims, unsupported 1+ year professional experience claims, and misrepresentation of internships as full-time employment.
 14. **Human Approval Gate & Safety Protections (`src/automation/formAssistant.js`):** Mandatory safety barrier requiring explicit human confirmation (`userConfirmedApproval: true`) before launching browser automation. Never clicks submit automatically, never bypasses CAPTCHA/OTP/SSO, and never signs legal declarations on behalf of the user.
 15. **Application Lifecycle Tracker (`src/tracker/applicationTracker.js`):** Manages full 9-stage lifecycle states (`interested` $\rightarrow$ `preparing` $\rightarrow$ `ready_for_review` $\rightarrow$ `submitted` $\rightarrow$ `assessment` $\rightarrow$ `interview` $\rightarrow$ `rejected` $\rightarrow$ `offer` $\rightarrow$ `withdrawn`). Enforces strict gatekeeper rule blocking `submitted` transitions unless user explicitly confirms submission (`userConfirmed: true`), recording timestamped audit logs and confirmation numbers.
 16. **Interactive Application Workbench Modal (`src/dashboard/`):** Dashboard UI (`http://127.0.0.1:3000`) featuring `[📝 Applications]` pipeline viewer, `[🌐 Portals]` support matrix dialog, and a modal Application Workbench for every job showing real-time freshness, recommended resume version, editable screening questions with verified evidence citations, safety warnings, and manual submission confirmation.
 17. **Unified Communication & Calendar Intelligence (`src/email/`, `src/calendar/`, `src/tracker/followUpManager.js`):**
-    * **Google OAuth Integration (`src/email/googleOAuthClient.js`):** Enforces minimum required scopes (`gmail.readonly`, `gmail.compose`, `calendar.events`, `calendar.readonly`). Supports automatic token refresh via refresh tokens, local encrypted/safe token persistence in untracked `data/.oauth_tokens/`, and clean account disconnection/revocation. Never requests or stores the candidate's Google account password.
+    * **Google OAuth Integration (`src/email/googleOAuthClient.js`):** Enforces minimum required scopes (`gmail.readonly`, `gmail.compose`, `calendar.events`). Implements cryptographically secure state parameters (256-bit random), PKCE S256 code challenge/verifier protection, exact redirect URI allowlist validation, AES-256-GCM authenticated token encryption at rest (`src/email/tokenEncryption.js`), automatic token refresh, seamless migration from legacy plaintext tokens, and secure disconnect wiping with user confirmation (`userConfirmed: true`). Never requests or stores the candidate's Google account password.
     * **Recruiter Email Intelligence (`src/email/recruiterEmailParser.js`):** Multi-class categorization engine recognizing 8 message categories:
       - `INTERVIEW_INVITATION`
       - `ASSESSMENT`
@@ -212,7 +212,7 @@ npm test
     * **Application Funnel & Conversion Analytics (`src/intelligence/careerAnalyticsService.js`):** Computes response rate, interview conversion rate, offer rate, and average response latency. Enforces small-sample size warning gate ($N < 10$) to prevent premature statistical conclusions.
     * **Rejection Pattern Intelligence (`src/intelligence/careerAnalyticsService.js`):** Explicitly separates known recruiter reasons from heuristic JD mismatch hypotheses, generating targeted action items.
     * **Company & Recruiter Research (`src/intelligence/companyResearchService.js`):** Synthesizes structured company profiles, verified tech stacks, standard interview processes, and legitimate recruiter contacts with distinct verification tiers (`verified_official` vs `community_reported`).
-    * **Indian Salary & Offer Calculator (`src/intelligence/salaryCalculatorService.js`):** Computes in-hand pay under FY 2024–25 New Tax Regime (Section 87A rebate up to ₹7 LPA, standard deduction ₹75,000, statutory EPF and Professional Tax), compares Bengaluru vs Remote living expenses, and provides side-by-side offer evaluation.
+    * **Indian Salary & Offer Calculator (`src/intelligence/salaryCalculatorService.js`):** Computes net in-hand pay under official Government of India income tax rules (Finance (No. 2) Act, 2024 / Section 115BAC New Tax Regime with ₹75,000 standard deduction, Section 87A rebate of zero tax up to ₹7 LPA, marginal relief, Old Regime comparisons, and EPF/PT statutory rates). Explicitly separates CTC, fixed gross pay, variable pay, employer contributions (employer EPF + gratuity), employee deductions (employee EPF + PT + income tax TDS), and monthly/annual in-hand take-home. Discloses all calculation assumptions and non-binding estimate notices.
 25. **Unified Automation Engine & Control Center (`src/scheduler/automationEngine.js`):**
     * **Configurable Background Tasks:** Orchestrates 7 independent, fully configurable background tasks:
       - `job_discovery`: Scheduled job scans across ATS feeds (Lever, Ashby, Greenhouse, SmartRecruiters) and FreeHire.
@@ -237,6 +237,19 @@ npm test
     * **Bounded Queries & Streaming:** Strict `LIMIT` and pagination prevents unbounded in-memory collection growth.
     * **SQLite WAL Mode:** Configured with `PRAGMA journal_mode = WAL;` and `PRAGMA busy_timeout = 5000;` for non-blocking concurrent reads and fast transactions.
     * **Local Interface Binding:** Binds strictly to `127.0.0.1` by default to prevent unwanted LAN exposure.
+28. **Critical Security & Accuracy Remediation (Phase 8):**
+    * **Local Dashboard API Hardening:** Removed unrestricted CORS; implemented strict Host header validation (DNS rebinding defense), same-origin validation, CSRF defenses (`Sec-Fetch-Site: cross-site` blocking), 512KB payload size limits, parameterized ID validations, path traversal guards on static/download/restore routes, and sanitized error messages.
+    * **OAuth 2.0 PKCE & At-Rest Encryption:** Cryptographic state validation (single-use), PKCE S256 challenge/verifier, minimum necessary scopes (3 scopes), AES-256-GCM token encryption with machine/user-bound key derivation, automatic legacy plaintext migration, and confirmation-gated account revocation and secure file wiping.
+    * **Candidate Truthfulness & Grounding:** Candidate profile strictly represents Abhishek N as an MCA 2026 fresher (0 years full-time commercial experience), Anudip Foundation as internship/practical training, and rejects any unsupported claims of 1+ year professional experience or full-time employment.
+    * **Statutory Indian Salary Calculator:** Multi-year statutory verification across FY 2024–25 (Finance (No. 2) Act, 2024), FY 2025–26 (Finance Act, 2025), and FY 2026–27 (Income-tax Act, 2025 with Section 19(1) employment tax deduction and ₹12 LPA rebate threshold). Itemized separation of CTC, fixed gross, variable pay, employer contributions, employee deductions, and net in-hand take-home.
+    * **Browser Automation SSRF Protection:** Prevents Playwright from accessing local network hosts, cloud metadata services (169.254.169.254), private IP ranges, or non-HTTP(S) schemes.
+29. **Application Correctness & Freshness Safeguards:**
+    * **Strict Application Submission Gate:** `applied_date` is not set prematurely upon preparation; stamped only after explicit user confirmation on employer portal.
+    * **Job Ingestion Gate:** Rejects corrupted records at the validation gate before SQLite storage.
+    * **Honest Date Preservation:** Unknown posting dates are stored honestly as `NULL` and rendered as `'Date unlisted'` (zero fake timestamp substitution).
+    * **Freshness & Eligibility Safeguards:** Expired jobs and fresher-ineligible roles are hard-blocked from browser autofill.
+    * **Company Research Transparency:** Zero fabrication for unknown companies (`techStack: []`, clearly labelled as unverified templates).
+    * **Resilient Gmail Synchronization:** Incremental sync (`after:${epoch}`), pagination traversal (`nextPageToken`), robust base64url/multipart MIME parsing, and defensive RFC 2822 date parsing.
 
 ---
 
@@ -277,11 +290,10 @@ To connect your real Gmail and Google Calendar:
    node src/cli.js auth-gmail
    # OR: Click [📬 Comms & Calendar] -> [⚙️ Google OAuth] in the web dashboard
    ```
-7. Authorize the 4 minimum required scopes:
-   - `https://www.googleapis.com/auth/gmail.readonly`
-   - `https://www.googleapis.com/auth/gmail.compose`
-   - `https://www.googleapis.com/auth/calendar.events`
-   - `https://www.googleapis.com/auth/calendar.readonly`
+7. Authorize the 3 minimum required scopes:
+   - `https://www.googleapis.com/auth/gmail.readonly` (read recruiter emails)
+   - `https://www.googleapis.com/auth/gmail.compose` (create draft replies only; cannot send directly)
+   - `https://www.googleapis.com/auth/calendar.events` (read & create interview appointments)
 
-OAuth tokens are saved locally in `data/.oauth_tokens/token.json` (strictly excluded by `.gitignore`). Tokens auto-refresh using the refresh token, and accounts can be instantly disconnected and revoked at any time via the dashboard or CLI.
+OAuth tokens are saved locally in `data/.oauth_tokens/token.json` encrypted via AES-256-GCM (strictly excluded by `.gitignore`). Tokens auto-refresh using the refresh token, and accounts can be instantly disconnected, revoked, and wiped at any time via the dashboard or CLI with explicit confirmation.
 

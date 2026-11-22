@@ -262,7 +262,7 @@ test('Phase 5: Company and Recruiter Research Evidence Tiers', () => {
 
 test('Phase 5: Indian Salary & Offer Calculator (Taxes, Slabs, EPF & Net Savings)', () => {
   // Scenario 1: ₹5,00,000 CTC in Bengaluru (New Tax Regime FY 24-25)
-  // Taxable income after Standard Deduction ₹75,000 and PT ₹2,400 is < ₹7,00,000 -> Tax is ₹0 under Sec 87A
+  // Taxable income after Standard Deduction ₹75,000 is < ₹7,00,000 -> Tax is ₹0 under Sec 87A (PT is non-deductible under Section 115BAC)
   const offer1 = calculateOfferTakeHome({
     ctcAnnual: 500000,
     location: 'Bengaluru',

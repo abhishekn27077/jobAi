@@ -29,7 +29,7 @@ export function validateJobRecord(rawJob) {
   // 3. Validate URL
   const rawUrl = (rawJob.url || '').trim();
   const canonicalUrl = normalizeCanonicalUrl(rawUrl);
-  if (!canonicalUrl) {
+  if (!canonicalUrl || !/^https?:\/\//i.test(canonicalUrl)) {
     errors.push(`Invalid or missing application URL: "${rawUrl}"`);
   }
 
@@ -144,7 +144,7 @@ export function validateJobRecord(rawJob) {
     skills,
     requiredSkills,
     preferredSkills,
-    postedAt: rawJob.postedAt || rawJob.posted_at || new Date().toISOString()
+    postedAt: rawJob.postedAt || rawJob.posted_at || null
   };
 
   return {

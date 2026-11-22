@@ -98,9 +98,19 @@ test('Screening Engine strictly grounds answers in verified candidate profile wi
 
   // Truthfulness validator
   const profile = loadCandidateProfile();
-  const validCheck = validateAnswerTruthfulness('1 year of Java experience building full stack web applications with Spring Boot.', profile);
+  const validCheck = validateAnswerTruthfulness('Hands-on Java experience building full stack web applications with Spring Boot during MCA.', profile);
   assert.strictEqual(validCheck.valid, true);
   assert.strictEqual(validCheck.issues.length, 0);
+
+  // Claiming 1+ years of professional/full-time experience when candidate is a fresher must be rejected
+  const invalidExpCheck = validateAnswerTruthfulness('I have 1 year of professional experience as a Java developer.', profile);
+  assert.strictEqual(invalidExpCheck.valid, false);
+  assert.ok(invalidExpCheck.issues.some(i => i.includes('exceeding candidate\'s verified fresher status')));
+
+  // Falsely claiming Anudip was full-time employment must be rejected
+  const anudipFullTimeCheck = validateAnswerTruthfulness('I was a full-time software engineer at Anudip Foundation.', profile);
+  assert.strictEqual(anudipFullTimeCheck.valid, false);
+  assert.ok(anudipFullTimeCheck.issues.some(i => i.includes('represented as an internship')));
 
   const fabricatedDegree = validateAnswerTruthfulness('I hold a Ph.D. in Computer Science from Stanford University.', profile);
   assert.strictEqual(fabricatedDegree.valid, false);
@@ -108,7 +118,7 @@ test('Screening Engine strictly grounds answers in verified candidate profile wi
 
   const fabricatedYears = validateAnswerTruthfulness('I have 6 years of industry experience building cloud architectures.', profile);
   assert.strictEqual(fabricatedYears.valid, false);
-  assert.ok(fabricatedYears.issues.some(i => i.includes('exceeding verified fresher')));
+  assert.ok(fabricatedYears.issues.some(i => i.includes('exceeding candidate\'s verified fresher status')));
 });
 
 test('Human Approval Gate prevents automatic launch and prevents unconfirmed submissions', async () => {

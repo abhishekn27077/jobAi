@@ -16,6 +16,8 @@ import { loadCandidateProfile } from '../profile/profileManager.js';
 import path from 'node:path';
 import fs from 'node:fs';
 
+import { updateApplicationStatus } from '../tracker/applicationTracker.js';
+
 export async function prepareApplication(jobId) {
   const db = getDatabase();
 
@@ -25,30 +27,62 @@ export async function prepareApplication(jobId) {
   }
 
   // 1. Freshness & Liveness Check
-  let freshness = { verificationStatus: job.verification_status || 'unverified', isAlive: true };
-  try {
-    if (job.url && job.url.startsWith('http')) {
-      freshness = await verifyJobUrl(job.url);
-      // Update database if changed
-      db.prepare(`
-        UPDATE jobs 
-        SET verification_status = ?, last_verified_at = datetime('now'), verification_reason = ? 
-        WHERE id = ?
-      `).run(freshness.verificationStatus, freshness.reason || null, jobId);
+  let freshness = { verificationStatus: job.verification_status || 'unverified', isAlive: job.verification_status !== 'expired' && job.status !== 'expired' };
+  if (job.status === 'expired' || job.verification_status === 'expired') {
+    freshness = {
+      verificationStatus: 'expired',
+      isAlive: false,
+      reason: job.verification_reason || 'Job marked as expired or vacancy closed'
+    };
+  } else {
+    try {
+      if (job.url && job.url.startsWith('http')) {
+        freshness = await verifyJobUrl(job.url);
+        // Update database if changed
+        db.prepare(`
+          UPDATE jobs 
+          SET verification_status = ?, last_verified_at = datetime('now'), verification_reason = ? 
+          WHERE id = ?
+        `).run(freshness.verificationStatus, freshness.reason || null, jobId);
+      }
+    } catch (err) {
+      console.warn(`[Workflow Notice] Freshness check fallback: ${err.message}`);
     }
-  } catch (err) {
-    console.warn(`[Workflow Notice] Freshness check fallback: ${err.message}`);
+  }
+
+  const isExpired = job.status === 'expired' || job.verification_status === 'expired' || freshness.verificationStatus === 'expired';
+  if (isExpired) {
+    freshness.isAlive = false;
   }
 
   // 2. Eligibility & Matching Re-evaluation
   const evaluation = evaluateJobFit(job);
 
-  // 3. Portal Detection & Support Level
+  // 3. Collect Freshness, Security & Eligibility Warnings
+  const warnings = [];
+  if (isExpired) {
+    warnings.push(`Job #${jobId} is marked as expired or closed. Autofill is blocked.`);
+  }
+  if (freshness.verificationStatus === 'blocked') {
+    warnings.push('Job URL is protected by anti-bot verification or security checkpoint. Manual review and navigation required.');
+  } else if (freshness.verificationStatus === 'inaccessible') {
+    warnings.push('Job URL is inaccessible (HTTP error or network failure). Manual verification required.');
+  } else if (freshness.verificationStatus === 'unverified') {
+    warnings.push('Job listing is unverified for active status. Please verify before applying.');
+  }
+
+  if (evaluation.fresherEligible === 0) {
+    warnings.push(`Candidate fresher profile is not eligible for this role: ${evaluation.summaryReason}. Autofill is blocked.`);
+  }
+
+  const isAutofillAllowed = !isExpired && evaluation.fresherEligible === 1;
+
+  // 4. Portal Detection & Support Level
   const portalAdapter = getPortalAdapter(job.url);
   const portalType = portalAdapter.name;
   const supportLevel = portalAdapter.getSupportLevel();
 
-  // 4. Recommend Most Relevant Verified Resume Version
+  // 5. Recommend Most Relevant Verified Resume Version
   let existingVersions = getResumeVersionsForJob(jobId);
   let selectedVersion = null;
 
@@ -75,16 +109,16 @@ export async function prepareApplication(jobId) {
     selectedVersion = existingVersions[0] || saved;
   }
 
-  // 5. Generate JD-Specific Cover Letter
+  // 6. Generate JD-Specific Cover Letter
   const profile = loadCandidateProfile();
   const coverLetter = generateTailoredCoverLetter(job, profile);
 
-  // 6. Screening Questions & Answers
+  // 7. Screening Questions & Answers
   const screeningAnswers = generateScreeningAnswers(job);
 
-  // 7. Job-Specific Application Checklist
+  // 8. Job-Specific Application Checklist
   const checklist = [
-    { id: 'freshness', label: 'Job URL freshness verified', completed: freshness.isAlive, status: freshness.verificationStatus },
+    { id: 'freshness', label: 'Job URL freshness verified', completed: freshness.isAlive && !isExpired, status: freshness.verificationStatus },
     { id: 'eligibility', label: 'Candidate fresher eligibility confirmed', completed: evaluation.fresherEligible === 1, details: evaluation.summaryReason },
     { id: 'resume', label: `Tailored resume ready (${selectedVersion.version_number ? 'v' + selectedVersion.version_number : 'v1'})`, completed: Boolean(selectedVersion.pdf_path), path: selectedVersion.pdf_path },
     { id: 'cover_letter', label: 'JD-specific cover letter generated', completed: true },
@@ -94,7 +128,9 @@ export async function prepareApplication(jobId) {
     { id: 'manual_submission', label: 'Manual final submission on employer site', completed: false, required: true }
   ];
 
-  // 8. Prevent Duplicate Applications — Create or Update Application Tracker Record
+  // 9. Prevent Duplicate Applications — Create or Update Application Tracker Record
+  // CRITICAL REQUIREMENT: Do NOT set applied_date when preparing an application.
+  // applied_date remains NULL until explicit user-confirmed submission.
   const existingApp = db.prepare('SELECT * FROM applications WHERE job_id = ?').get(jobId);
   let applicationId;
 
@@ -106,19 +142,18 @@ export async function prepareApplication(jobId) {
     let history = [];
     try {
       history = existingApp.status_history_json ? JSON.parse(existingApp.status_history_json) : [];
-    } catch {}
+    } catch { }
     history.push({ status: existingApp.status || 'preparing', timestamp: now, note: 'Application dossier refreshed' });
 
     db.prepare(`
       UPDATE applications 
-      SET portal_type = ?, resume_version = ?, applied_date = COALESCE(applied_date, ?),
+      SET portal_type = ?, resume_version = ?,
           job_url = ?, job_source = ?, checklist_json = ?, screening_answers_json = ?,
           status_history_json = ?, updated_at = datetime('now')
       WHERE id = ?
     `).run(
       portalType,
       selectedVersion.pdf_path ? path.basename(selectedVersion.pdf_path) : 'v1_Resume.pdf',
-      now,
       job.url,
       job.source || 'direct',
       JSON.stringify(checklist),
@@ -131,12 +166,11 @@ export async function prepareApplication(jobId) {
       INSERT INTO applications (
         job_id, portal_type, resume_version, applied_date, user_approved,
         notes, status, job_url, job_source, checklist_json, screening_answers_json, status_history_json
-      ) VALUES (?, ?, ?, ?, 0, ?, 'preparing', ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, NULL, 0, ?, 'preparing', ?, ?, ?, ?, ?)
     `).run(
       jobId,
       portalType,
       selectedVersion.pdf_path ? path.basename(selectedVersion.pdf_path) : 'v1_Resume.pdf',
-      now,
       `Application prepared for ${job.title} @ ${job.company}`,
       job.url,
       job.source || 'direct',
@@ -180,6 +214,8 @@ export async function prepareApplication(jobId) {
       matchedSkills: evaluation.matchedSkills,
       missingSkills: evaluation.missingSkills
     },
+    warnings,
+    isAutofillAllowed,
     portal: {
       name: portalType,
       supportLevel
@@ -197,5 +233,32 @@ export async function prepareApplication(jobId) {
     screeningAnswers,
     checklist
   };
+}
+
+/**
+ * Confirms manual user submission of an application on employer portal.
+ * STRICT APPROVAL GATE: Sets applied_date ONLY upon explicit user confirmation.
+ */
+export function confirmApplicationSubmission(jobId, { confirmationNumber = null, notes = null, userConfirmed = false } = {}) {
+  if (!userConfirmed) {
+    throw new Error('Approval Gate Violation: Cannot confirm application submission without explicit user confirmation.');
+  }
+
+  const result = updateApplicationStatus(jobId, 'submitted', {
+    confirmationNumber,
+    notes: notes || 'User confirmed submission on employer portal',
+    userConfirmed: true
+  });
+
+  const db = getDatabase();
+  db.prepare(`
+    INSERT INTO activity_audit_log (action, details)
+    VALUES (?, ?)
+  `).run(
+    'APPLICATION_SUBMISSION_CONFIRMED',
+    `User confirmed manual submission for Job #${jobId}. Confirmation: ${confirmationNumber || 'None'}`
+  );
+
+  return result;
 }
 
