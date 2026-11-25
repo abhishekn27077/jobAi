@@ -5,6 +5,7 @@
  */
 
 import fs from 'node:fs';
+import path from 'node:path';
 import { Document, Paragraph, TextRun, HeadingLevel, Packer, AlignmentType, UnderlineType } from 'docx';
 
 export async function exportToDocx(resumeData, outputPath) {
@@ -240,6 +241,11 @@ export async function exportToDocx(resumeData, outputPath) {
       }
     ]
   });
+
+  const dir = path.dirname(outputPath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
 
   const buffer = await Packer.toBuffer(doc);
   fs.writeFileSync(outputPath, buffer);

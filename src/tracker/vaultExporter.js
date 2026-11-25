@@ -12,10 +12,13 @@ export function exportVaultToCsv() {
   const rows = db.prepare(`
     SELECT 
       j.id, j.title, j.company, j.location, j.url, j.salary, j.status,
-      e.score, e.rating, e.recommendation, e.summary_reason, j.created_at
+      CASE WHEN j.status = 'expired' OR j.verification_status = 'expired' THEN 0 ELSE COALESCE(e.score, 0) END as score,
+      CASE WHEN j.status = 'expired' OR j.verification_status = 'expired' THEN 1 ELSE COALESCE(e.rating, 1) END as rating,
+      CASE WHEN j.status = 'expired' OR j.verification_status = 'expired' THEN 'EXPIRED' ELSE COALESCE(e.recommendation, 'REJECTED') END as recommendation,
+      e.summary_reason, j.created_at
     FROM jobs j
     LEFT JOIN job_evaluations e ON j.id = e.job_id
-    ORDER BY e.score DESC, j.id DESC
+    ORDER BY score DESC, j.id DESC
   `).all();
 
   if (!fs.existsSync(OUTPUT_DIR)) {
@@ -57,10 +60,14 @@ export function exportVaultToJson() {
   const db = getDatabase();
   const rows = db.prepare(`
     SELECT 
-      j.*, e.score, e.rating, e.recommendation, e.summary_reason, e.skills_matched, e.skills_missing
+      j.*,
+      CASE WHEN j.status = 'expired' OR j.verification_status = 'expired' THEN 0 ELSE COALESCE(e.score, 0) END as score,
+      CASE WHEN j.status = 'expired' OR j.verification_status = 'expired' THEN 1 ELSE COALESCE(e.rating, 1) END as rating,
+      CASE WHEN j.status = 'expired' OR j.verification_status = 'expired' THEN 'EXPIRED' ELSE COALESCE(e.recommendation, 'REJECTED') END as recommendation,
+      e.summary_reason, e.skills_matched, e.skills_missing
     FROM jobs j
     LEFT JOIN job_evaluations e ON j.id = e.job_id
-    ORDER BY e.score DESC
+    ORDER BY score DESC
   `).all();
 
   const jsonPath = path.join(OUTPUT_DIR, 'career_pipeline.json');

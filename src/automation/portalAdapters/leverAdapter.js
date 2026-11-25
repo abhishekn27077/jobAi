@@ -77,8 +77,14 @@ export class LeverAdapter extends BasePortalAdapter {
           }, qKey);
 
           if (targetInput && await targetInput.asElement()) {
-            await targetInput.asElement().fill(val);
-            filled.push({ field: `Screening: ${qKey}`, value: val });
+            const el = targetInput.asElement();
+            await el.fill(val);
+            const elSelector = await el.evaluate(e => {
+              if (e.name) return `[name="${e.name}"]`;
+              if (e.id) return `#${e.id}`;
+              return null;
+            }).catch(() => null);
+            filled.push({ field: `Screening: ${qKey}`, selector: elSelector, value: val });
           }
         } catch {}
       }
@@ -94,28 +100,5 @@ export class LeverAdapter extends BasePortalAdapter {
       verification,
       unverified
     };
-  }
-
-  async verifyFilledFields(page, filledItems) {
-    const verified = [];
-    for (const item of filledItems) {
-      if (!item.selector || item.field === 'Resume File') {
-        verified.push({ field: item.field, status: 'verified_present', value: item.value });
-        continue;
-      }
-      try {
-        const actualValue = await page.$eval(item.selector, el => el.value || '').catch(() => null);
-        const matches = actualValue !== null && (actualValue.trim() === item.value.trim() || item.value.includes(actualValue));
-        verified.push({
-          field: item.field,
-          status: matches ? 'verified_match' : 'mismatch',
-          expected: item.value,
-          actual: actualValue
-        });
-      } catch (e) {
-        verified.push({ field: item.field, status: 'unverifiable', error: e.message });
-      }
-    }
-    return verified;
   }
 }

@@ -17,6 +17,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 
 import { updateApplicationStatus } from '../tracker/applicationTracker.js';
+import { normalizeCanonicalUrl } from '../discovery/urlNormalizer.js';
 
 export async function prepareApplication(jobId) {
   const db = getDatabase();
@@ -53,6 +54,11 @@ export async function prepareApplication(jobId) {
   const isExpired = job.status === 'expired' || job.verification_status === 'expired' || freshness.verificationStatus === 'expired';
   if (isExpired) {
     freshness.isAlive = false;
+    db.prepare(`
+      UPDATE job_evaluations
+      SET recommendation = 'EXPIRED', score = 0
+      WHERE job_id = ?
+    `).run(jobId);
   }
 
   // 2. Eligibility & Matching Re-evaluation
@@ -131,7 +137,22 @@ export async function prepareApplication(jobId) {
   // 9. Prevent Duplicate Applications — Create or Update Application Tracker Record
   // CRITICAL REQUIREMENT: Do NOT set applied_date when preparing an application.
   // applied_date remains NULL until explicit user-confirmed submission.
-  const existingApp = db.prepare('SELECT * FROM applications WHERE job_id = ?').get(jobId);
+  const canonicalUrl = normalizeCanonicalUrl(job.url || '');
+  const canonicalUrlAlt = canonicalUrl.endsWith('/') ? canonicalUrl.slice(0, -1) : (canonicalUrl + '/');
+  const jobUrlAlt = (job.url || '').endsWith('/') ? (job.url || '').slice(0, -1) : ((job.url || '') + '/');
+
+  let existingApp = db.prepare(`
+    SELECT a.* FROM applications a
+    LEFT JOIN jobs j ON a.job_id = j.id
+    WHERE a.job_id = ?
+       OR a.job_url IN (?, ?, ?, ?)
+       OR (j.canonical_url IS NOT NULL AND j.canonical_url IN (?, ?, ?, ?))
+    LIMIT 1
+  `).get(
+    jobId,
+    job.url, jobUrlAlt, canonicalUrl, canonicalUrlAlt,
+    job.url, jobUrlAlt, canonicalUrl, canonicalUrlAlt
+  );
   let applicationId;
 
   const now = new Date().toISOString();

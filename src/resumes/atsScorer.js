@@ -88,6 +88,14 @@ export function calculateAtsScore(jdAnalysis, resumeData, candidateProfile = nul
       title: 'Potential Stretch Opportunity',
       message: `Job specifies ${reqExpText} experience for "${roleTitle}". As a ${candDegree} graduate with verified full-stack project and internship evidence, this is a viable stretch application; address the experience delta in your cover letter.`
     };
+  } else if (eligibilityAssessment.status === 'POTENTIALLY_ELIGIBLE') {
+    overallScore = Math.round(resumeCompatibilityScore * 0.90);
+    overallRecommendation = 'POTENTIALLY_ELIGIBLE';
+    alert = {
+      type: 'warning',
+      title: 'Potentially Eligible Role',
+      message: `B.Tech/B.E. is mentioned without exclusivity. Candidate holds verified ${candDegree} and is potentially eligible; confirm specific degree acceptance with the employer.`
+    };
   } else if (eligibilityAssessment.status === 'ELIGIBLE') {
     overallRecommendation = resumeCompatibilityScore >= 75 ? 'HIGH_MATCH' : 'MODERATE_MATCH';
     alert = {
@@ -359,14 +367,30 @@ export function evaluateJobEligibility(jd, candidateProfile, reqCoverage) {
   }
 
   // Check 2: Degree eligibility
-  const edu = jd.education || { isEligibleForMCA: true };
-  if (edu.isEligibleForMCA === false) {
-    unmet.push(`Job explicitly requests non-CS degree: ${(edu.degrees || []).join(', ')}. Candidate holds ${candDegree}.`);
+  const edu = jd.education || {};
+  const degreeClass = edu.degreeClassification ||
+    (edu.isEligibleForMCA === false ? 'BTECH_STRICT_RESTRICTION' :
+     edu.isEligibleForMCA === true ? 'MCA_EXPLICIT' : 'UNCLEAR');
+
+  if (degreeClass === 'BTECH_STRICT_RESTRICTION' || edu.isEligibleForMCA === false) {
+    unmet.push(`Job specifies an explicit B.Tech/B.E.-only restriction with no MCA or equivalent acceptance. Verified qualification is ${candDegree}.`);
     status = 'MANDATORY_NOT_MET';
     label = 'Mandatory requirement not met';
     badgeClass = 'not-met';
-  } else if (!edu.degrees || edu.degrees.length === 0) {
-    uncertain.push('Specific educational degree requirements not detailed in job description.');
+  } else if (degreeClass === 'BTECH_NON_EXCLUSIVE') {
+    uncertain.push('B.Tech/B.E. mentioned without exclusivity. Candidate is potentially eligible; confirm specific MCA acceptance with employer.');
+    if (status === 'ELIGIBLE') {
+      status = 'POTENTIALLY_ELIGIBLE';
+      label = 'Potentially eligible';
+      badgeClass = 'stretch';
+    }
+  } else if (degreeClass === 'UNCLEAR') {
+    uncertain.push('Educational degree requirements not specified in job description; eligibility status is unknown.');
+    if (status === 'ELIGIBLE') {
+      status = 'INSUFFICIENT_INFO';
+      label = 'Insufficient information';
+      badgeClass = 'info';
+    }
   }
 
   // Check 3: Missing critical mandatory skills
@@ -386,27 +410,59 @@ export function evaluateJobEligibility(jd, candidateProfile, reqCoverage) {
     experienceMin: exp.min,
     experienceMax: exp.max,
     isFresherEligible: exp.isFresherEligible,
-    degreeEligible: edu.isEligibleForMCA !== false
+    degreeEligible: degreeClass !== 'BTECH_STRICT_RESTRICTION'
   };
 }
 
 function evaluateEducationMatch(jd) {
   const max = 10;
-  const edu = jd.education || { degrees: [], isEligibleForMCA: true };
+  const edu = jd.education || {};
+  const classification = edu.degreeClassification || (edu.isEligibleForMCA ? 'MCA_EXPLICIT' : 'UNCLEAR');
 
-  if (edu.isEligibleForMCA) {
-    return {
-      score: 10,
-      max,
-      reason: 'MCA (Master of Computer Applications) from AIMS Institutes fully meets qualification requirements.'
-    };
+  switch (classification) {
+    case 'MCA_EXPLICIT':
+      return {
+        score: 10,
+        max,
+        classification,
+        reason: 'MCA (Master of Computer Applications) from AIMS Institutes is explicitly accepted by employer.'
+      };
+    case 'EQUIVALENT_ACCEPTED':
+      return {
+        score: 10,
+        max,
+        classification,
+        reason: 'Employer explicitly accepts equivalent CS/IT qualifications. Candidate\'s verified MCA satisfies this requirement.'
+      };
+    case 'BTECH_NON_EXCLUSIVE':
+      return {
+        score: 6,
+        max,
+        classification,
+        reason: 'B.Tech/B.E. mentioned without exclusivity. Candidate is potentially eligible, but specific MCA acceptance is unconfirmed.'
+      };
+    case 'UNCLEAR':
+      return {
+        score: 5,
+        max,
+        classification,
+        reason: 'Qualification requirements are unclear or unstated in job description. Candidate is not penalized, but evidence of acceptance is unconfirmed.'
+      };
+    case 'BTECH_STRICT_RESTRICTION':
+      return {
+        score: 0,
+        max,
+        classification,
+        reason: 'Job posting specifies an explicit B.Tech/B.E.-only restriction with no MCA or equivalent acceptance.'
+      };
+    default:
+      return {
+        score: 5,
+        max,
+        classification: 'UNCLEAR',
+        reason: 'Qualification requirement not explicitly detailed in job description.'
+      };
   }
-
-  return {
-    score: 6,
-    max,
-    reason: `JD mentions specialized degrees: ${edu.degrees.join(', ')}. MCA represents related CS qualification.`
-  };
 }
 
 function evaluateProjectRelevance(jd, resumeLower, candidateProfile) {

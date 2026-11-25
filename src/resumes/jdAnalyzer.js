@@ -4,6 +4,8 @@
  * education, responsibilities, and high-value ATS keywords from JD text.
  */
 
+import { classifyDegreeRequirement } from '../matcher/degreeClassifier.js';
+
 // Canonical dictionary of tech skills and synonyms
 const TECH_DICTIONARY = {
   languages: [
@@ -228,11 +230,14 @@ function extractEducation(text) {
   if (/\bm\.?tech\b|\bmaster\s*of\s*technology\b/i.test(text)) degrees.push('M.Tech');
   if (/\bcomputer\s*science\b|\bit\b|\binformation\s*technology\b/i.test(text)) degrees.push('Computer Science / IT');
 
-  const isEligibleForMCA = degrees.length === 0 || degrees.includes('MCA') || degrees.includes('BCA') || degrees.includes('Computer Science / IT') || /any\s*graduate|degree\s*in\s*engineering|related\s*field/i.test(text);
+  const degreeClassification = classifyDegreeRequirement(text);
 
   return {
     degrees: degrees.length > 0 ? degrees : ['Degree in Computer Science or related field'],
-    isEligibleForMCA
+    isEligibleForMCA: degreeClassification.isStrictlyIneligible ? false : true,
+    degreeClassification: degreeClassification.classification,
+    eligibilityStatus: degreeClassification.eligibilityStatus,
+    classificationDetails: degreeClassification
   };
 }
 

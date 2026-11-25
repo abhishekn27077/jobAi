@@ -248,6 +248,24 @@ test('Phase 5: Rejection Pattern Intelligence (Strict Known vs Inferred Separati
 });
 
 test('Phase 5: Company and Recruiter Research Evidence Tiers', () => {
+  // Ensure isolated deterministic test fixture for PradeepIT in database
+  db.prepare('DELETE FROM company_research WHERE LOWER(company_name) = LOWER(?)').run('PradeepIT Consulting Services Pvt Ltd');
+  db.prepare(`
+    INSERT OR REPLACE INTO jobs (id, external_slug, source, title, company, location, url, description, required_skills, verification_status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    40001,
+    'test-pradeepit-fixture-slug',
+    'freehire',
+    'Java Backend Developer',
+    'PradeepIT Consulting Services Pvt Ltd',
+    'Bengaluru, Karnataka, India',
+    'https://example.com/pradeepit-job',
+    'PradeepIT is hiring a Java Spring Boot developer with SQL and REST API skills.',
+    JSON.stringify(['Java', 'Spring Boot', 'SQL']),
+    'discovered'
+  );
+
   const research = getCompanyResearch('PradeepIT Consulting Services Pvt Ltd');
 
   assert.strictEqual(research.companyName, 'PradeepIT Consulting Services Pvt Ltd');

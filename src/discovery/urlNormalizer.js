@@ -196,3 +196,50 @@ export function generateJobDedupSignature(job) {
 
   return `${normCompany}::${normTitle}::${primaryCity}`;
 }
+
+/**
+ * Extracts stable ATS requisition / job identifier from URL if present.
+ */
+export function extractAtsJobId(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== 'string') return null;
+  try {
+    const parsed = new URL(rawUrl.trim());
+    const host = parsed.hostname.toLowerCase();
+    const pathname = parsed.pathname;
+
+    // Greenhouse: boards.greenhouse.io or /jobs/12345
+    if (host.includes('greenhouse.io') || pathname.includes('/jobs/')) {
+      const ghMatch = pathname.match(/\/jobs\/([0-9]+)/);
+      if (ghMatch) return `gh-${ghMatch[1]}`;
+    }
+
+    // Lever: jobs.lever.co
+    if (host.includes('lever.co')) {
+      const leverMatch = pathname.match(/\/([a-f0-9-]{10,})/i);
+      if (leverMatch) return `lever-${leverMatch[1]}`;
+    }
+
+    // Ashby: jobs.ashbyhq.com
+    if (host.includes('ashbyhq.com')) {
+      const ashbyMatch = pathname.match(/\/([a-f0-9-]{10,})/i);
+      if (ashbyMatch) return `ashby-${ashbyMatch[1]}`;
+    }
+
+    // SmartRecruiters: jobs.smartrecruiters.com
+    if (host.includes('smartrecruiters.com')) {
+      const srMatch = pathname.match(/\/([0-9]{7,16})(?:-|$)/);
+      if (srMatch) return `sr-${srMatch[1]}`;
+    }
+
+    // Fallbacks
+    const ashbyUuid = pathname.match(/\/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/i);
+    if (ashbyUuid) return `ashby-${ashbyUuid[1]}`;
+
+    const numMatch = pathname.match(/\/([0-9]{7,16})(?:-|\/|$)/);
+    if (numMatch) return `ats-${numMatch[1]}`;
+
+    return null;
+  } catch {
+    return null;
+  }
+}

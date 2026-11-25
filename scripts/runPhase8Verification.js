@@ -3,6 +3,8 @@
  * Exercises Items 2 through 7 in isolation without modifying production databases or user secrets.
  */
 
+process.env.NODE_ENV = 'test';
+
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';

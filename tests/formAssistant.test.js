@@ -39,7 +39,11 @@ test('Form Assistant accurately pre-fills HTML application form fields', async (
   try {
     browser = await chromium.launch({ channel: 'chrome', headless: true });
   } catch {
-    browser = await chromium.launch({ channel: 'msedge', headless: true });
+    try {
+      browser = await chromium.launch({ channel: 'msedge', headless: true });
+    } catch {
+      browser = await chromium.launch({ headless: true });
+    }
   }
 
   try {

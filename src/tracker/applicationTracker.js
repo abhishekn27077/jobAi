@@ -91,9 +91,25 @@ export function updateApplicationStatus(jobId, newStatus, { notes = '', confirma
   }
 
   const db = getDatabase();
-  const existing = db.prepare('SELECT * FROM applications WHERE job_id = ?').get(jobId);
+  let existing = db.prepare('SELECT * FROM applications WHERE job_id = ?').get(jobId);
   if (!existing) {
-    throw new Error(`No application record found for job #${jobId}.`);
+    const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(jobId);
+    if (!job) {
+      throw new Error(`No application record found for job #${jobId}.`);
+    }
+    const insertRes = db.prepare(`
+      INSERT INTO applications (
+        job_id, portal_type, resume_version, applied_date, user_approved,
+        notes, status, job_url, job_source, checklist_json, screening_answers_json, status_history_json
+      ) VALUES (?, ?, 'v1_Resume.pdf', NULL, 0, ?, 'preparing', ?, ?, '[]', '{}', '[]')
+    `).run(
+      jobId,
+      job.source || 'Direct',
+      notes || `Application initiated for ${job.title} @ ${job.company}`,
+      job.url || '',
+      job.source || 'direct'
+    );
+    existing = db.prepare('SELECT * FROM applications WHERE id = ?').get(insertRes.lastInsertRowid);
   }
 
   let history = [];

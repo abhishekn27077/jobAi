@@ -65,7 +65,7 @@ export class WorkdayAdapter extends BasePortalAdapter {
             filled.push({ field: fieldName, selector: sel, value });
             return true;
           }
-        } catch {}
+        } catch { }
       }
       return false;
     };
@@ -75,6 +75,9 @@ export class WorkdayAdapter extends BasePortalAdapter {
     await tryFill(['input[data-automation-id*="legalNameSection_lastName"]', 'input[id*="input-2"]'], mappedData.lastName, 'Last Name');
     await tryFill(['input[data-automation-id*="email"]', 'input[type="email"]'], mappedData.email, 'Email');
     await tryFill(['input[data-automation-id*="phone"]', 'input[type="tel"]'], mappedData.phone, 'Phone');
+    await tryFill(['input[data-automation-id*="linkedin" i]', 'input[id*="linkedin" i]'], mappedData.linkedIn, 'LinkedIn');
+    await tryFill(['input[data-automation-id*="website" i]', 'input[data-automation-id*="portfolio" i]'], mappedData.portfolio, 'Portfolio');
+    await tryFill(['input[data-automation-id*="addressSection_city" i]', 'input[id*="city" i]'], mappedData.city, 'City');
 
     // Resume Attachment if available
     if (resumePdfPath && fs.existsSync(resumePdfPath)) {
@@ -89,11 +92,51 @@ export class WorkdayAdapter extends BasePortalAdapter {
       }
     }
 
+    // Custom Screening Questions (Matched by Label or Name)
+    if (screeningAnswers && typeof screeningAnswers === 'object') {
+      for (const [qKey, answerData] of Object.entries(screeningAnswers)) {
+        const val = typeof answerData === 'string' ? answerData : answerData.answer;
+        if (!val) continue;
+
+        try {
+          const matchedEl = await page.evaluateHandle((query) => {
+            const labels = Array.from(document.querySelectorAll('label, [data-automation-id*="label"]'));
+            for (const lbl of labels) {
+              if (lbl.innerText.toLowerCase().includes(query.toLowerCase())) {
+                const targetId = lbl.getAttribute('for');
+                if (targetId) return document.getElementById(targetId);
+                return lbl.querySelector('input, textarea, select') || lbl.nextElementSibling?.querySelector('input, textarea, select');
+              }
+            }
+            return null;
+          }, qKey);
+
+          if (matchedEl && await matchedEl.asElement()) {
+            const el = matchedEl.asElement();
+            const tag = await el.evaluate(e => e.tagName.toLowerCase());
+            if (tag === 'textarea' || tag === 'input') {
+              await el.fill(val);
+              const elSelector = await el.evaluate(e => {
+                if (e.id) return `#${e.id}`;
+                if (e.name) return `[name="${e.name}"]`;
+                return null;
+              }).catch(() => null);
+              filled.push({ field: `Screening: ${qKey}`, selector: elSelector, value: val });
+            }
+          }
+        } catch {}
+      }
+    }
+
+    // Verification read-back
+    const verification = await this.verifyFilledFields(page, filled);
+
     return {
       portal: 'Workday',
       supportLevel: 'partially_supported',
       fieldsFilledCount: filled.length,
       filledFields: filled,
+      verification,
       unverified,
       instructions: 'Workday multi-stage applications require manual step verification for each page.'
     };

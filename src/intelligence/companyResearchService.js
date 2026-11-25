@@ -21,7 +21,12 @@ export function getCompanyResearch(companyName, job = null) {
 
   // Extract combined tech stack across company JDs (no arbitrary fabrication)
   const techStackSet = new Set();
-  vaultJobs.forEach(j => {
+  const allJobs = [...vaultJobs];
+  if (job && !allJobs.some(j => j.id && j.id === job.id)) {
+    allJobs.push(job);
+  }
+
+  allJobs.forEach(j => {
     let reqs = [];
     try {
       reqs = j.required_skills ? JSON.parse(j.required_skills) : [];

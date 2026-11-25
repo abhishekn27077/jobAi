@@ -53,7 +53,8 @@ import {
   listBackups,
   restoreDatabase,
   runDatabaseIntegrityCheck,
-  exportCandidateFullArchive
+  exportCandidateFullArchive,
+  cleanTestFixtures
 } from '../db/backupService.js';
 import { getDatabase } from '../db/schema.js';
 
@@ -275,7 +276,7 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
         const workMode = parsedUrl.searchParams.get('workMode') || undefined;
         const verificationStatus = parsedUrl.searchParams.get('verificationStatus') || undefined;
         const minScore = parseInt(parsedUrl.searchParams.get('minScore') || '0', 10);
-        const limit = Math.min(parseInt(parsedUrl.searchParams.get('limit') || '100', 10), 500);
+        const limit = Math.min(parseInt(parsedUrl.searchParams.get('limit') || '200', 10), 2000);
         const offset = parseInt(parsedUrl.searchParams.get('offset') || '0', 10);
 
         const jobs = getJobs({ status, recommendation, minScore, source, location, workMode, verificationStatus, limit, offset });
@@ -393,6 +394,24 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
       return;
     }
 
+    // GET /api/job/:id
+    const jobDetailMatch = pathname.match(/^\/api\/job\/(\d+)$/);
+    if (jobDetailMatch && req.method === 'GET') {
+      try {
+        const jobId = parseValidId(jobDetailMatch[1], 'Job ID');
+        const db = getDatabase();
+        const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(jobId);
+        if (!job) {
+          sendJson(404, { success: false, error: 'Job not found' });
+          return;
+        }
+        sendJson(200, { success: true, job });
+      } catch (e) {
+        sendJson(e.statusCode || 500, { success: false, error: e.message });
+      }
+      return;
+    }
+
     // GET /api/job/:id/application
     if (pathname.startsWith('/api/job/') && pathname.endsWith('/application') && req.method === 'GET') {
       try {
@@ -462,16 +481,74 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
       return;
     }
 
-    // POST /api/job/:id/application/status
-    if (pathname.startsWith('/api/job/') && pathname.endsWith('/application/status') && req.method === 'POST') {
+    // POST /api/job/:id/application/status or POST /api/application/:id/status
+    if (((pathname.startsWith('/api/job/') && pathname.endsWith('/application/status')) ||
+         (pathname.startsWith('/api/application/') && pathname.endsWith('/status'))) && req.method === 'POST') {
       const body = await safeReadBody();
       if (body === null) return;
 
       try {
-        const jobId = parseValidId(pathname.split('/')[3], 'Job ID');
+        const rawId = pathname.split('/')[3];
+        const isAppPath = pathname.startsWith('/api/application/');
+        const db = getDatabase();
+        let jobId;
+        if (isAppPath) {
+          const app = db.prepare('SELECT job_id FROM applications WHERE id = ?').get(rawId);
+          jobId = app ? app.job_id : parseValidId(rawId, 'Job ID');
+        } else {
+          jobId = parseValidId(rawId, 'Job ID');
+        }
         const { status, notes, confirmationNumber, userConfirmed } = body;
         const result = updateAppStatus(jobId, status, { notes, confirmationNumber, userConfirmed });
         sendJson(200, result);
+      } catch (e) {
+        sendJson(400, { error: e.message });
+      }
+      return;
+    }
+
+    // POST /api/job/:id/application/notes or POST /api/application/:id/notes
+    if (((pathname.startsWith('/api/job/') && pathname.endsWith('/application/notes')) ||
+         (pathname.startsWith('/api/application/') && pathname.endsWith('/notes'))) && req.method === 'POST') {
+      const body = await safeReadBody();
+      if (body === null) return;
+
+      try {
+        const rawId = pathname.split('/')[3];
+        const isAppPath = pathname.startsWith('/api/application/');
+        const db = getDatabase();
+        let jobId;
+        if (isAppPath) {
+          const app = db.prepare('SELECT job_id FROM applications WHERE id = ?').get(rawId);
+          jobId = app ? app.job_id : parseValidId(rawId, 'Job ID');
+        } else {
+          jobId = parseValidId(rawId, 'Job ID');
+        }
+        const noteText = (body.notes || body.note || '').trim();
+        if (!noteText) {
+          sendJson(400, { error: 'Note text cannot be empty' });
+          return;
+        }
+        const existing = db.prepare('SELECT * FROM applications WHERE job_id = ?').get(jobId);
+        if (!existing) {
+          sendJson(404, { error: `No application record found for job #${jobId}` });
+          return;
+        }
+        const updatedNotes = existing.notes ? `${existing.notes} | ${noteText}` : noteText;
+        db.prepare(`UPDATE applications SET notes = ?, updated_at = datetime('now') WHERE job_id = ?`).run(updatedNotes, jobId);
+        sendJson(200, { success: true, jobId, notes: updatedNotes });
+      } catch (e) {
+        sendJson(400, { error: e.message });
+      }
+      return;
+    }
+
+    // GET /api/job/:id/application-record
+    if (pathname.startsWith('/api/job/') && pathname.endsWith('/application-record') && req.method === 'GET') {
+      try {
+        const jobId = parseValidId(pathname.split('/')[3], 'Job ID');
+        const app = getApplicationByJobId(jobId);
+        sendJson(200, { success: true, application: app });
       } catch (e) {
         sendJson(400, { error: e.message });
       }
@@ -1474,12 +1551,24 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
       return;
     }
 
+    // POST /api/backup/cleanup-fixtures
+    if (req.method === 'POST' && pathname === '/api/backup/cleanup-fixtures') {
+      try {
+        const result = cleanTestFixtures();
+        sendJson(200, result);
+      } catch (e) {
+        sendJson(500, { error: e.message });
+      }
+      return;
+    }
+
     // ==========================================
     // STATIC FILE SERVING WITH PATH TRAVERSAL GUARD
     // ==========================================
-    const safePath = path.normalize(pathname).replace(/^(\.\.[/\\])+/, '');
-    const fileName = safePath === '/' || safePath === '' ? 'index.html' : safePath;
-    const resolvedStaticPath = path.resolve(PUBLIC_DIR, fileName.replace(/^[/\\]+/, ''));
+    const relativePath = pathname.replace(/^[/\\]+/, '');
+    const fileName = (relativePath === '' || relativePath === 'index.html') ? 'index.html' : relativePath;
+    const cleanSafe = path.normalize(fileName).replace(/^(\.\.[/\\])+/, '');
+    const resolvedStaticPath = path.resolve(PUBLIC_DIR, cleanSafe);
 
     if (!resolvedStaticPath.startsWith(path.resolve(PUBLIC_DIR))) {
       res.writeHead(403, { 'Content-Type': 'text/plain' });

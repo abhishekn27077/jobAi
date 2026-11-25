@@ -3,14 +3,25 @@
  * Compiles HTML templates into print-ready A4 PDF files using local Playwright Chrome / Edge.
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { chromium } from 'playwright';
 
 export async function exportToPdf(htmlContent, outputPath) {
+  const dir = path.dirname(outputPath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+
   let browser;
   try {
     browser = await chromium.launch({ channel: 'chrome', headless: true });
   } catch {
-    browser = await chromium.launch({ channel: 'msedge', headless: true });
+    try {
+      browser = await chromium.launch({ channel: 'msedge', headless: true });
+    } catch {
+      browser = await chromium.launch({ headless: true });
+    }
   }
 
   try {

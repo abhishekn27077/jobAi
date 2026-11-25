@@ -8,12 +8,43 @@ const __dirname = path.dirname(__filename);
 const DATA_DIR = path.resolve(__dirname, '../../data');
 const DB_PATH = path.join(DATA_DIR, 'career_vault.db');
 
-export function getDatabase() {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+export function getDbPath() {
+  if (process.env.CAREEROS_DB_PATH) {
+    return process.env.CAREEROS_DB_PATH;
   }
 
-  const db = new DatabaseSync(DB_PATH);
+  // Automatic test environment isolation
+  const isTest = process.env.NODE_ENV === 'test' ||
+    process.execArgv.some(a => a.includes('--test')) ||
+    process.argv.some(a => a.includes('--test') || a.endsWith('.test.js') || a.includes('node:test') || a.includes('runPhase8Verification') || a.includes('verify'));
+
+  if (isTest) {
+    const testDir = path.resolve(__dirname, '../../data/test_db');
+    if (!fs.existsSync(testDir)) {
+      fs.mkdirSync(testDir, { recursive: true });
+    }
+    const testDbPath = path.join(testDir, `test_vault_${process.pid}.db`);
+    if (!fs.existsSync(testDbPath) && fs.existsSync(DB_PATH)) {
+      try {
+        fs.copyFileSync(DB_PATH, testDbPath);
+      } catch (err) {
+        // Fallback to empty schema initialization if copy fails
+      }
+    }
+    return testDbPath;
+  }
+
+  return DB_PATH;
+}
+
+export function getDatabase(customPath = null) {
+  const targetPath = customPath || getDbPath();
+  const dir = path.dirname(targetPath);
+  if (dir && dir !== '.' && !fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+
+  const db = new DatabaseSync(targetPath);
   initSchema(db);
   return db;
 }

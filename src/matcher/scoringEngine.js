@@ -1,4 +1,5 @@
 import { getAllCandidateSkills, loadCandidateProfile } from '../profile/profileManager.js';
+import { classifyDegreeRequirement, DEGREE_CLASSIFICATIONS, ELIGIBILITY_STATUSES } from './degreeClassifier.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,7 +16,10 @@ export function evaluateJobFit(job) {
   const titleLower = (job.title || '').toLowerCase();
   const locationLower = (job.location || '').toLowerCase();
 
-  // 1. Seniority & Fresher Eligibility Check (Weight: 30)
+  // 1. Degree Eligibility Check (Conservative 5-tier classification)
+  const degreeEval = classifyDegreeRequirement(job.description || textToScan);
+
+  // 2. Seniority & Fresher Eligibility Check (Weight: 30)
   let seniorityScore = 20; // default baseline
   let fresherEligible = true;
   const seniorKeywords = preferences.filtering.strictExcludeKeywords || [];
@@ -33,7 +37,11 @@ export function evaluateJobFit(job) {
   const expMin = job.experienceMin !== undefined ? job.experienceMin : (job.experience_min !== undefined ? job.experience_min : null);
   const expMax = job.experienceMax !== undefined ? job.experienceMax : (job.experience_max !== undefined ? job.experience_max : null);
 
-  if (hasSeniorTitle) {
+  if (degreeEval.isStrictlyIneligible) {
+    // Explicit B.Tech-only restriction with no MCA/equivalent acceptance
+    seniorityScore = 0;
+    fresherEligible = false;
+  } else if (hasSeniorTitle) {
     seniorityScore = 0;
     fresherEligible = false;
   } else if (expMin !== null && expMin > 2) {
@@ -148,9 +156,13 @@ export function evaluateJobFit(job) {
   else if (compositeScore >= 50) rating = 3;
   else if (compositeScore >= 35) rating = 2;
 
-  // Determine Recommendation
+  const isExpired = job.status === 'expired' || job.verification_status === 'expired';
+
+  // Determine Recommendation (Expired or Ineligible roles MUST never receive active recommendations)
   let recommendation = 'REJECTED';
-  if (!fresherEligible) {
+  if (isExpired) {
+    recommendation = 'EXPIRED';
+  } else if (!fresherEligible) {
     recommendation = 'REJECTED';
   } else if (compositeScore >= 65) {
     recommendation = 'RECOMMENDED';
@@ -160,31 +172,75 @@ export function evaluateJobFit(job) {
     recommendation = 'REJECTED';
   }
 
-  // Generate plain English explanation
+  // Generate plain English explanation covering all 6 dimensions
   const reasons = [];
-  if (!fresherEligible) {
-    reasons.push(`Excluded: Senior/Experienced role (${job.experienceMin ? job.experienceMin + '+ yrs' : 'Senior title detected'}). Abhishek is an MCA 2026 Fresher.`);
-  } else {
-    if (hasFresherKeyword) reasons.push('Explicitly open to Freshers / Trainees / Entry-level.');
-    if (isBangalore) reasons.push('Location is Bengaluru (Candidate top priority).');
-    else if (isRemote) reasons.push('Location is Remote friendly.');
-    else if (isOtherIndiaHub) reasons.push(`Location is in India (${job.location || 'India Tech Hub'}).`);
 
-    if (matchedSkills.length > 0) {
-      reasons.push(`Skills match Abhishek's verified profile: ${matchedSkills.join(', ')}.`);
-    }
-    if (missingSkills.length > 0) {
-      reasons.push(`Unmatched requirements: ${missingSkills.join(', ')}.`);
-    }
+  // Dimension 1: Expiry / Liveness
+  if (isExpired) {
+    reasons.push(`Posting is expired or closed (${job.verification_reason || 'Verified inactive'}). Active recommendation is suppressed.`);
+  }
+
+  // Dimension 2: Degree Restrictions & Qualification Alignment
+  if (degreeEval.isStrictlyIneligible) {
+    reasons.push(`Degree Restriction: Role strictly requires B.Tech/B.E. with exclusion against MCA/non-engineering candidates (${degreeEval.reason}).`);
+  } else if (degreeEval.classification === DEGREE_CLASSIFICATIONS.MCA_EXPLICIT) {
+    reasons.push('Education: MCA degree explicitly accepted (Confirmed Eligible).');
+  } else if (degreeEval.classification === DEGREE_CLASSIFICATIONS.EQUIVALENT_ACCEPTED) {
+    reasons.push('Education: Equivalent technical qualification explicitly accepted (Confirmed Eligible).');
+  } else if (degreeEval.classification === DEGREE_CLASSIFICATIONS.BTECH_NON_EXCLUSIVE) {
+    reasons.push('Education: B.Tech/B.E. mentioned non-exclusively; MCA candidate is potentially eligible.');
+  }
+
+  // Dimension 3: Experience & Seniority
+  if (hasSeniorTitle) {
+    reasons.push(`Seniority Mismatch (Excluded: Senior/Experienced role): Senior/Lead title detected in role (${job.title}). Abhishek is an MCA 2026 Fresher.`);
+  } else if (expMin !== null && expMin > 2) {
+    reasons.push(`Experience Mismatch (Excluded: Senior/Experienced role): Role requires ${expMin}+ years experience, exceeding candidate fresher profile (0-2 years).`);
+  } else if (hasFresherKeyword) {
+    reasons.push('Explicitly open to Freshers / Trainees / Entry-level.');
+  }
+
+  // Dimension 4: Location Fit
+  if (isBangalore) {
+    reasons.push('Location is Bengaluru (Candidate top priority).');
+  } else if (isRemote) {
+    reasons.push('Location is Remote friendly.');
+  } else if (isOtherIndiaHub) {
+    reasons.push(`Location is in India (${job.location || 'India Tech Hub'}).`);
+  } else if (locationLower.length > 0 && !locationLower.includes('india')) {
+    reasons.push(`Location Mismatch: Role location (${job.location}) is outside candidate preferred India tech hubs.`);
+  }
+
+  // Dimension 5: Skills Match & Stack Alignment
+  if (matchedSkills.length > 0) {
+    reasons.push(`Skills match Abhishek's verified profile: ${matchedSkills.join(', ')}.`);
+  }
+  if (missingSkills.length > 0) {
+    reasons.push(`Unmatched requirements: ${missingSkills.join(', ')}.`);
+  }
+  if (matchedSkills.length === 0 && skillsScore === 0) {
+    reasons.push('Tech Stack: Role requirements do not align with candidate core technical stack (Java, Spring Boot, React, SQL).');
+  }
+
+  // Dimension 6: Description Detail / Information Completeness
+  if (!job.description || job.description.trim().length < 50) {
+    reasons.push('Job description provides minimal details; evaluation is based primarily on available title and location metadata.');
+  }
+
+  // Mandatory Safety Fallback: Never silently produce an empty analysis string
+  if (reasons.length === 0) {
+    reasons.push(`Evaluation completed based on available role metadata. Match score: ${compositeScore}/100.`);
   }
 
   const summaryReason = reasons.join(' ');
 
   return {
-    score: compositeScore,
-    rating,
+    score: (isExpired || degreeEval.isStrictlyIneligible) ? 0 : compositeScore,
+    rating: (isExpired || degreeEval.isStrictlyIneligible) ? 1 : rating,
     recommendation,
-    fresherEligible: fresherEligible ? 1 : 0,
+    fresherEligible: (fresherEligible && !degreeEval.isStrictlyIneligible && !isExpired) ? 1 : 0,
+    degreeClassification: degreeEval.classification,
+    degreeEligibilityStatus: degreeEval.eligibilityStatus,
     summaryReason,
     matchedSkills,
     missingSkills,

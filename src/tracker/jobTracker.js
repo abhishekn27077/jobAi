@@ -1,7 +1,7 @@
 import { getDatabase } from '../db/schema.js';
 import { evaluateJobFit } from '../matcher/scoringEngine.js';
 import { validateJobRecord } from '../discovery/jobValidator.js';
-import { normalizeCanonicalUrl, normalizeCompanyName, normalizeJobTitle } from '../discovery/urlNormalizer.js';
+import { normalizeCanonicalUrl, normalizeCompanyName, normalizeJobTitle, extractAtsJobId } from '../discovery/urlNormalizer.js';
 
 export function saveOrUpdateJob(rawJob) {
   const db = getDatabase();
@@ -22,29 +22,54 @@ export function saveOrUpdateJob(rawJob) {
 
   const job = validation.normalizedJob || rawJob;
   const canonicalUrl = normalizeCanonicalUrl(job.url || '');
+  const canonicalUrlAlt = canonicalUrl.endsWith('/') ? canonicalUrl.slice(0, -1) : (canonicalUrl + '/');
+  const incomingAtsId = extractAtsJobId(job.url || '') || job.externalSlug || null;
 
   // Deduplication Strategy:
   // 1. Match on external_slug
-  // 2. Match on canonical_url
-  // 3. Match on exact company + title + primary city
+  // 2. Match on canonical_url (including trailing-slash variants)
+  // 3. Match on exact company + title + primary city (preserving distinct ATS requisitions)
   let existing = null;
   if (job.externalSlug) {
-    existing = db.prepare('SELECT id, status, posted_at, source, source_confidence, completeness_score FROM jobs WHERE external_slug = ?').get(job.externalSlug);
+    existing = db.prepare('SELECT id, external_slug, url, status, posted_at, source, source_confidence, completeness_score FROM jobs WHERE external_slug = ?').get(job.externalSlug);
   }
 
   if (!existing && canonicalUrl) {
-    existing = db.prepare('SELECT id, status, posted_at, source, source_confidence, completeness_score FROM jobs WHERE canonical_url = ? OR url = ?').get(canonicalUrl, canonicalUrl);
+    existing = db.prepare(`
+      SELECT id, external_slug, url, status, posted_at, source, source_confidence, completeness_score
+      FROM jobs
+      WHERE canonical_url IN (?, ?) OR url IN (?, ?)
+      LIMIT 1
+    `).get(canonicalUrl, canonicalUrlAlt, canonicalUrl, canonicalUrlAlt);
+  }
+
+  if (!existing && incomingAtsId) {
+    existing = db.prepare(`
+      SELECT id, external_slug, url, status, posted_at, source, source_confidence, completeness_score
+      FROM jobs
+      WHERE external_slug = ? OR url LIKE ? OR canonical_url LIKE ?
+      LIMIT 1
+    `).get(incomingAtsId, `%${incomingAtsId}%`, `%${incomingAtsId}%`);
   }
 
   if (!existing && job.company && job.title) {
     const city = (job.location || '').split(',')[0].trim().toLowerCase();
-    existing = db.prepare(`
-      SELECT id, status, posted_at, source, source_confidence, completeness_score FROM jobs 
+    const candidates = db.prepare(`
+      SELECT id, external_slug, url, status, posted_at, source, source_confidence, completeness_score FROM jobs
       WHERE LOWER(TRIM(company)) = LOWER(TRIM(?)) 
         AND LOWER(TRIM(title)) = LOWER(TRIM(?))
         AND (LOWER(location) LIKE ? OR location IS NULL OR location = '')
-      LIMIT 1
-    `).get(job.company, job.title, `%${city}%`);
+    `).all(job.company, job.title, `%${city}%`);
+
+    for (const cand of candidates) {
+      const candAtsId = extractAtsJobId(cand.url || '') || cand.external_slug || null;
+      // If both have ATS IDs and they differ, these are genuinely distinct job openings (e.g. bulk hiring).
+      if (incomingAtsId && candAtsId && incomingAtsId !== candAtsId) {
+        continue;
+      }
+      existing = cand;
+      break;
+    }
   }
 
   const reqSkillsJson = JSON.stringify(job.requiredSkills || job.skills || []);
@@ -193,6 +218,9 @@ export function getJobs({ status, recommendation, minScore = 0, source, location
   if (recommendation) {
     query += ` AND e.recommendation = ?`;
     params.push(recommendation);
+    if (!status && recommendation === 'RECOMMENDED') {
+      query += ` AND j.status != 'expired' AND j.verification_status != 'expired'`;
+    }
   }
 
   if (minScore > 0) {
@@ -291,8 +319,22 @@ export function getStats() {
   const db = getDatabase();
 
   const total = db.prepare('SELECT count(*) as count FROM jobs').get().count;
-  const recommended = db.prepare("SELECT count(*) as count FROM job_evaluations WHERE recommendation = 'RECOMMENDED'").get().count;
-  const consider = db.prepare("SELECT count(*) as count FROM job_evaluations WHERE recommendation = 'CONSIDER'").get().count;
+  const recommended = db.prepare(`
+    SELECT count(*) as count
+    FROM job_evaluations e
+    JOIN jobs j ON e.job_id = j.id
+    WHERE e.recommendation = 'RECOMMENDED'
+      AND j.status != 'expired'
+      AND j.verification_status != 'expired'
+  `).get().count;
+  const consider = db.prepare(`
+    SELECT count(*) as count
+    FROM job_evaluations e
+    JOIN jobs j ON e.job_id = j.id
+    WHERE e.recommendation = 'CONSIDER'
+      AND j.status != 'expired'
+      AND j.verification_status != 'expired'
+  `).get().count;
   const rejected = db.prepare("SELECT count(*) as count FROM job_evaluations WHERE recommendation = 'REJECTED'").get().count;
   const saved = db.prepare("SELECT count(*) as count FROM jobs WHERE status = 'saved'").get().count;
   const applied = db.prepare("SELECT count(*) as count FROM jobs WHERE status = 'applied'").get().count;

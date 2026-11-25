@@ -523,8 +523,9 @@ async function main() {
       console.log(`\n--- CareerOS: Indian Salary & Take-Home Calculator ---`);
       const calc = calculateOfferTakeHome({ ctcAnnual: ctc, location, workMode: mode });
 
+      const fixedAmount = calc.fixedGrossAnnual ?? calc.fixedPayAnnual ?? calc.ctcAnnual;
       console.log(`Annual CTC:                  ₹${calc.ctcAnnual.toLocaleString('en-IN')}`);
-      console.log(`Fixed Compensation:          ₹${calc.fixedPayAnnual.toLocaleString('en-IN')}/year`);
+      console.log(`Fixed Compensation:          ₹${fixedAmount.toLocaleString('en-IN')}/year`);
       console.log(`Work Location & Mode:        ${calc.location} (${calc.workMode.toUpperCase()})`);
       console.log(`------------------------------------------------------`);
       console.log(`Monthly Gross Pay:           ₹${calc.monthlyBreakdown.grossPay.toLocaleString('en-IN')}`);
@@ -547,24 +548,39 @@ async function main() {
       console.log(`======================================================\n`);
 
       const status = getAutomationControlStatus();
+      const executing = status.health?.currentlyExecuting || status.runningLocks || [];
       console.log(`Master Engine Status: ${status.isEnginePaused ? '⏸️ PAUSED' : '⚡ ACTIVE'}`);
-      console.log(`Running Locks:        ${status.runningLocks.length > 0 ? status.runningLocks.join(', ') : 'None (Idle)'}\n`);
+      console.log(`Running Locks:        ${executing.length > 0 ? executing.join(', ') : 'None (Idle)'}\n`);
 
       console.log('--- SCHEDULED AUTOMATION TASKS ---');
       status.tasks.forEach(t => {
-        const flag = t.is_enabled ? '🟢 ENABLED' : '⚪ DISABLED';
-        const failText = t.failure_count > 0 ? ` (⚠️ ${t.failure_count} failures)` : '';
-        console.log(`• [${t.task_key}] - ${t.task_name} [${flag}]${failText}`);
-        console.log(`    Interval: Every ${t.interval_minutes} mins | Next: ${t.next_run_at || 'Pending'}`);
-        console.log(`    Last Run: ${t.last_run_at || 'Never'} [${t.last_status || 'IDLE'}]`);
-        if (t.last_error) console.log(`    Last Error: ${t.last_error}`);
+        const isEnabled = t.isEnabled ?? Boolean(t.is_enabled);
+        const flag = isEnabled ? '🟢 ENABLED' : '⚪ DISABLED';
+        const failCount = t.consecutiveFailures ?? t.failure_count ?? 0;
+        const failText = failCount > 0 ? ` (⚠️ ${failCount} failures)` : '';
+        const taskKey = t.taskKey || t.task_key;
+        const taskName = t.name || t.task_name;
+        const interval = t.intervalMinutes ?? t.interval_minutes;
+        const nextRun = t.nextRunAt || t.next_run_at || 'Pending';
+        const lastRun = t.lastRunAt || t.last_run_at || 'Never';
+        const lastStatus = t.lastStatus || t.last_status || 'IDLE';
+        const lastError = t.lastError || t.last_error;
+
+        console.log(`• [${taskKey}] - ${taskName} [${flag}]${failText}`);
+        console.log(`    Interval: Every ${interval} mins | Next: ${nextRun}`);
+        console.log(`    Last Run: ${lastRun} [${lastStatus}]`);
+        if (lastError) console.log(`    Last Error: ${lastError}`);
       });
 
-      if (status.recentRuns.length > 0) {
+      if (status.recentRuns && status.recentRuns.length > 0) {
         console.log('\n--- RECENT RUN TELEMETRY (Last 5) ---');
         status.recentRuns.slice(0, 5).forEach(r => {
-          console.log(`  [${r.status}] ${r.task_key} (${r.duration_ms}ms) at ${r.started_at}`);
-          if (r.error_message) console.log(`      Error: ${r.error_message}`);
+          const key = r.taskKey || r.task_key;
+          const dur = r.durationMs ?? r.duration_ms ?? 0;
+          const started = r.startedAt || r.started_at;
+          const err = r.errorMessage || r.error_message;
+          console.log(`  [${r.status}] ${key} (${dur}ms) at ${started}`);
+          if (err) console.log(`      Error: ${err}`);
         });
       }
       console.log('');
@@ -601,7 +617,10 @@ async function main() {
       const list = listBackups();
       console.log(`\nFound ${list.length} snapshots in data/backups/:\n`);
       list.forEach(b => {
-        console.log(`• ${b.filename} (${(b.size_bytes / 1024).toFixed(1)} KB) - ${b.created_at} [${b.label}]`);
+        const sizeBytes = b.sizeBytes ?? b.size_bytes ?? 0;
+        const createdAt = b.createdAt ?? b.created_at ?? 'Recent';
+        const label = b.label || 'snapshot';
+        console.log(`• ${b.filename} (${(sizeBytes / 1024).toFixed(1)} KB) - ${createdAt} [${label}]`);
       });
       console.log('');
       break;
@@ -630,9 +649,17 @@ async function main() {
     case 'db-check': {
       console.log('Running SQLite PRAGMA integrity and foreign key checks...');
       const check = runDatabaseIntegrityCheck();
-      console.log(`\nResult: ${check.ok ? '✅ PASS' : '❌ FAIL'}`);
-      console.log(`Message: ${check.message}`);
-      if (check.details) console.log('Details:', check.details);
+      const isPass = Boolean(check.isHealthy ?? check.ok ?? (check.integrityStatus === 'ok'));
+      console.log(`\nResult: ${isPass ? '✅ PASS' : '❌ FAIL'}`);
+      console.log(`Integrity Status: ${check.integrityStatus || (isPass ? 'ok' : 'unknown')}`);
+      if (check.foreignKeyViolations && check.foreignKeyViolations.length > 0) {
+        console.log(`Foreign Key Violations: ${check.foreignKeyViolations.length}`);
+      } else {
+        console.log(`Foreign Key Violations: 0 (clean)`);
+      }
+      if (check.diagnostics) {
+        console.log(`Diagnostics: Jobs=${check.diagnostics.totalJobs}, Applications=${check.diagnostics.totalApplications}, Comms=${check.diagnostics.totalCommunications}`);
+      }
       console.log('');
       break;
     }
@@ -641,10 +668,9 @@ async function main() {
       console.log('Exporting full candidate career data archive to JSON...');
       const archive = exportCandidateFullArchive();
       console.log(`\n✅ Candidate Data Archive Exported:`);
-      console.log(`- Export Path:     ${archive.exportPath}`);
-      console.log(`- Candidate:       ${archive.profile.name} (${archive.profile.targetRole})`);
-      console.log(`- Records Exported: ${archive.recordCounts.jobs} jobs, ${archive.recordCounts.applications} applications, ${archive.recordCounts.stories} stories`);
-      console.log(`- Generated:       ${archive.exportedAt}\n`);
+      console.log(`- Export Path:      ${archive.outputPath || archive.exportPath || 'data/career_vault_export.json'}`);
+      console.log(`- Records Exported: ${archive.totalApplications ?? 0} applications, ${archive.totalSkillsRoadmapped ?? 0} roadmapped skills`);
+      console.log(`- Success:          ${archive.success ? 'YES' : 'NO'}\n`);
       break;
     }
 

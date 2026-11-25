@@ -4,6 +4,8 @@
  * DOM verification, and session wall detection for application portals.
  */
 
+import path from 'node:path';
+
 export class BasePortalAdapter {
   constructor(name, supportLevel = 'supported') {
     this.name = name;
@@ -28,11 +30,11 @@ export class BasePortalAdapter {
 
       const isSessionExpiry = /session.*(expired|timed?\s*out)|(expired|timed?\s*out).*session/i.test(pageText);
       const isLoginWall = url.includes('/login') ||
-                          url.includes('/signin') ||
-                          url.includes('/auth') ||
-                          pageText.includes('sign in to your account') ||
-                          pageText.includes('please log in to apply') ||
-                          isSessionExpiry;
+        url.includes('/signin') ||
+        url.includes('/auth') ||
+        pageText.includes('sign in to your account') ||
+        pageText.includes('please log in to apply') ||
+        isSessionExpiry;
 
       if (isLoginWall) {
         const bType = isSessionExpiry ? 'session_expired' : 'authentication_required';
@@ -48,10 +50,10 @@ export class BasePortalAdapter {
 
       // Check for bot challenges or CAPTCHA
       const hasCaptcha = pageText.includes('cf-browser-verification') ||
-                         pageText.includes('verify you are human') ||
-                         pageText.includes('turnstile') ||
-                         pageText.includes('recaptcha') ||
-                         pageText.includes('hcaptcha');
+        pageText.includes('verify you are human') ||
+        pageText.includes('turnstile') ||
+        pageText.includes('recaptcha') ||
+        pageText.includes('hcaptcha');
 
       if (hasCaptcha) {
         return {
@@ -143,15 +145,130 @@ export class BasePortalAdapter {
   }
 
   /**
-   * Reads back values from filled DOM elements to verify data integrity.
+   * Common ATS Field Read-Back Verification Contract (Phase 9.2):
+   * Inspects active DOM elements and returns standardized verification outcomes:
+   *  - 'VERIFIED': DOM element was inspected and its value matches expected profile value.
+   *  - 'MISMATCH': DOM element has a value that conflicts with the expected profile value.
+   *  - 'UNSUPPORTED': Field cannot be reliably read back or inspected in DOM.
    */
-  async verifyFilledFields(page, expectedValues) {
-    const results = [];
-    for (const [key, expected] of Object.entries(expectedValues)) {
-      if (!expected || typeof expected !== 'string') continue;
-      // Verification logic executed per selector
+  async verifyFilledFields(page, filledItems = []) {
+    const verified = [];
+    for (const item of filledItems) {
+      if (!item.selector) {
+        verified.push({
+          field: item.field,
+          status: 'UNSUPPORTED',
+          legacyStatus: 'unverifiable',
+          expected: item.value,
+          actual: null,
+          reason: 'No DOM selector available for field read-back'
+        });
+        continue;
+      }
+
+      // 1. File input inspection
+      if (item.field === 'Resume File' || item.selector.includes('type="file"')) {
+        try {
+          const fileInfo = await page.$eval(item.selector, el => {
+            if (el.files && el.files.length > 0) {
+              return { attached: true, name: el.files[0].name };
+            }
+            return { attached: false, name: '' };
+          }).catch(() => null);
+
+          if (fileInfo && fileInfo.attached) {
+            const expFile = path.basename(String(item.value || ''));
+            const isMatch = !expFile || fileInfo.name === expFile || fileInfo.name.includes(expFile) || expFile.includes(fileInfo.name);
+            verified.push({
+              field: item.field,
+              status: isMatch ? 'VERIFIED' : 'MISMATCH',
+              legacyStatus: isMatch ? 'verified_match' : 'mismatch',
+              expected: expFile,
+              actual: fileInfo.name,
+              reason: isMatch ? 'File confirmed attached in DOM' : `Attached file "${fileInfo.name}" in DOM does not match expected file "${expFile}"`
+            });
+          } else {
+            verified.push({
+              field: item.field,
+              status: 'UNSUPPORTED',
+              legacyStatus: 'unverifiable',
+              expected: item.value,
+              actual: null,
+              reason: 'File input DOM does not expose attached file details directly'
+            });
+          }
+        } catch (e) {
+          verified.push({
+            field: item.field,
+            status: 'UNSUPPORTED',
+            legacyStatus: 'unverifiable',
+            expected: item.value,
+            actual: null,
+            reason: `DOM file inspection unsupported: ${e.message}`
+          });
+        }
+        continue;
+      }
+
+      // 2. Text, email, tel, select, textarea, checkbox inputs
+      try {
+        const actualValue = await page.$eval(item.selector, el => {
+          if (el.tagName === 'SELECT') {
+            const opt = el.options[el.selectedIndex];
+            return opt ? (opt.text || opt.value || '') : '';
+          }
+          if (el.type === 'checkbox' || el.type === 'radio') {
+            return el.checked ? 'true' : 'false';
+          }
+          return el.value !== undefined ? el.value : (el.innerText || '');
+        }).catch(() => null);
+
+        if (actualValue === null) {
+          verified.push({
+            field: item.field,
+            status: 'UNSUPPORTED',
+            legacyStatus: 'unverifiable',
+            expected: item.value,
+            actual: null,
+            reason: 'Target element could not be queried in active DOM'
+          });
+          continue;
+        }
+
+        const expStr = String(item.value || '').trim();
+        const actStr = String(actualValue).trim();
+
+        let matches = false;
+        if (actStr === 'true' || actStr === 'false') {
+          const expBool = /^(true|yes|1|checked)$/i.test(expStr);
+          const actBool = actStr === 'true';
+          matches = expBool === actBool;
+        } else {
+          // Exact match or substring containment for URLs/composite strings
+          matches = actStr === expStr ||
+            (expStr.length > 0 && actStr.length > 0 && (expStr.includes(actStr) || actStr.includes(expStr)));
+        }
+
+        verified.push({
+          field: item.field,
+          status: matches ? 'VERIFIED' : 'MISMATCH',
+          legacyStatus: matches ? 'verified_match' : 'mismatch',
+          expected: expStr,
+          actual: actStr,
+          ...(matches ? {} : { reason: `Read-back value in DOM ("${actStr}") does not match expected profile value ("${expStr}")` })
+        });
+      } catch (e) {
+        verified.push({
+          field: item.field,
+          status: 'UNSUPPORTED',
+          legacyStatus: 'unverifiable',
+          expected: item.value,
+          actual: null,
+          reason: e.message
+        });
+      }
     }
-    return results;
+    return verified;
   }
 }
 

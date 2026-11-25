@@ -464,11 +464,20 @@ LinkedIn: [linkedin.com/in/abhishekn27077](https://linkedin.com/in/abhishekn2707
 }
 
 export async function compileToPdf(htmlContent, outputPath) {
+  const dir = path.dirname(outputPath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+
   let browser;
   try {
     browser = await chromium.launch({ channel: 'chrome', headless: true });
   } catch {
-    browser = await chromium.launch({ channel: 'msedge', headless: true });
+    try {
+      browser = await chromium.launch({ channel: 'msedge', headless: true });
+    } catch {
+      browser = await chromium.launch({ headless: true });
+    }
   }
   try {
     const page = await browser.newPage();
@@ -497,6 +506,13 @@ export async function exportTailoredDocumentsForJob(job) {
 
   const safeCompany = (job.company || 'Company').replace(/[^a-zA-Z0-9]/g, '_');
   const safeJobId = job.id || Date.now();
+
+  if (!fs.existsSync(RESUMES_DIR)) {
+    fs.mkdirSync(RESUMES_DIR, { recursive: true });
+  }
+  if (!fs.existsSync(LETTERS_DIR)) {
+    fs.mkdirSync(LETTERS_DIR, { recursive: true });
+  }
 
   const resumeMdPath = path.join(RESUMES_DIR, `${safeJobId}_${safeCompany}_Resume.md`);
   const resumePdfPath = path.join(RESUMES_DIR, `${safeJobId}_${safeCompany}_Resume.pdf`);

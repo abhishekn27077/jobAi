@@ -69,27 +69,4 @@ export class AshbyAdapter extends BasePortalAdapter {
       unverified
     };
   }
-
-  async verifyFilledFields(page, filledItems) {
-    const verified = [];
-    for (const item of filledItems) {
-      if (!item.selector || item.field === 'Resume File') {
-        verified.push({ field: item.field, status: 'verified_present', value: item.value });
-        continue;
-      }
-      try {
-        const actualValue = await page.$eval(item.selector, el => el.value || '').catch(() => null);
-        const matches = actualValue !== null && (actualValue.trim() === item.value.trim() || item.value.includes(actualValue));
-        verified.push({
-          field: item.field,
-          status: matches ? 'verified_match' : 'mismatch',
-          expected: item.value,
-          actual: actualValue
-        });
-      } catch (e) {
-        verified.push({ field: item.field, status: 'unverifiable', error: e.message });
-      }
-    }
-    return verified;
-  }
 }

@@ -20,6 +20,18 @@ import { loadCandidateProfile } from '../src/profile/profileManager.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+async function launchTestBrowser() {
+  try {
+    return await chromium.launch({ channel: 'chrome', headless: true });
+  } catch {
+    try {
+      return await chromium.launch({ channel: 'msedge', headless: true });
+    } catch {
+      return await chromium.launch({ headless: true });
+    }
+  }
+}
+
 test('Portal Registry accurately identifies ATS portals and provides support matrix', () => {
   const greenhouse = getPortalAdapter('https://boards.greenhouse.io/stripe/jobs/12345');
   assert.strictEqual(greenhouse.name, 'Greenhouse');
@@ -150,12 +162,7 @@ test('Human Approval Gate prevents automatic launch and prevents unconfirmed sub
 });
 
 test('Session Expiry and Auth Barrier Detection flags authentication walls', async () => {
-  let browser;
-  try {
-    browser = await chromium.launch({ channel: 'chrome', headless: true });
-  } catch {
-    browser = await chromium.launch({ channel: 'msedge', headless: true });
-  }
+  const browser = await launchTestBrowser();
 
   try {
     const page = await browser.newPage();
@@ -210,12 +217,7 @@ test('Greenhouse Adapter pre-fills form and verifies DOM values', async () => {
   const dummyPdf = path.join(__dirname, 'dummy_greenhouse_resume.pdf');
   fs.writeFileSync(dummyPdf, 'dummy pdf content for greenhouse', 'utf-8');
 
-  let browser;
-  try {
-    browser = await chromium.launch({ channel: 'chrome', headless: true });
-  } catch {
-    browser = await chromium.launch({ channel: 'msedge', headless: true });
-  }
+  const browser = await launchTestBrowser();
 
   try {
     const page = await browser.newPage();
@@ -261,7 +263,7 @@ test('Greenhouse Adapter pre-fills form and verifies DOM values', async () => {
     const verifications = fillResult.verification;
     const firstVer = verifications.find(v => v.field === 'First Name');
     assert.ok(firstVer);
-    assert.strictEqual(firstVer.status, 'verified_match');
+    assert.ok(firstVer.status === 'VERIFIED' || firstVer.status === 'verified_match');
   } finally {
     if (browser) await browser.close();
     if (fs.existsSync(dummyPdf)) fs.unlinkSync(dummyPdf);
@@ -273,12 +275,7 @@ test('Lever Adapter pre-fills single-page form and verifies DOM values', async (
   const dummyPdf = path.join(__dirname, 'dummy_lever_resume.pdf');
   fs.writeFileSync(dummyPdf, 'dummy pdf content for lever', 'utf-8');
 
-  let browser;
-  try {
-    browser = await chromium.launch({ channel: 'chrome', headless: true });
-  } catch {
-    browser = await chromium.launch({ channel: 'msedge', headless: true });
-  }
+  const browser = await launchTestBrowser();
 
   try {
     const page = await browser.newPage();
@@ -323,7 +320,7 @@ test('Lever Adapter pre-fills single-page form and verifies DOM values', async (
     const verifications = fillResult.verification;
     const nameVer = verifications.find(v => v.field === 'Full Name');
     assert.ok(nameVer);
-    assert.strictEqual(nameVer.status, 'verified_match');
+    assert.ok(nameVer.status === 'VERIFIED' || nameVer.status === 'verified_match');
   } finally {
     if (browser) await browser.close();
     if (fs.existsSync(dummyPdf)) fs.unlinkSync(dummyPdf);

@@ -256,11 +256,18 @@ export async function launchFormAssistant(job, options = {}) {
       args: ['--start-maximized']
     });
   } catch {
-    browser = await chromium.launch({
-      channel: 'msedge',
-      headless,
-      args: ['--start-maximized']
-    });
+    try {
+      browser = await chromium.launch({
+        channel: 'msedge',
+        headless,
+        args: ['--start-maximized']
+      });
+    } catch {
+      browser = await chromium.launch({
+        headless,
+        args: ['--start-maximized']
+      });
+    }
   }
 
   const context = await browser.newContext({ viewport: null });
@@ -288,10 +295,55 @@ export async function launchFormAssistant(job, options = {}) {
     const fillResult = await autoFillApplicationForm(page, profile, pdfPath, { screeningAnswers: answers, adapter });
     console.log(`[Form Assistant] Auto-filled ${fillResult.fieldsFilled} standard fields using ${adapter.name} adapter.`);
 
-    // 5. Update Application Tracker to 'ready_for_review'
+    // Read-back verification checks (Phase 9.2 Common Contract)
+    const mismatches = (fillResult.verification || []).filter(
+      v => v.status === 'MISMATCH' || v.legacyStatus === 'mismatch'
+    );
+    const verifiedCount = (fillResult.verification || []).filter(
+      v => (v.status === 'VERIFIED' || v.legacyStatus === 'verified_match') && v.status !== 'UNSUPPORTED'
+    ).length;
+    const unsupportedCount = (fillResult.verification || []).filter(
+      v => v.status === 'UNSUPPORTED' || v.legacyStatus === 'unverifiable'
+    ).length;
+
+    // Strict Gate: Mismatches must block progression to human review until corrected
+    if (mismatches.length > 0) {
+      console.warn(`[Form Assistant Safety Warning] Read-back mismatch detected on ${mismatches.length} field(s): ${mismatches.map(m => m.field).join(', ')}. Progression to 'ready_for_review' is BLOCKED.`);
+      try {
+        updateApplicationStatus(job.id, 'needs_correction', {
+          notes: `Form Assistant detected ${mismatches.length} verification mismatch(es): ${mismatches.map(m => `${m.field} (expected: "${m.expected}", actual: "${m.actual}")`).join('; ')}. Manual correction required before review.`
+        });
+      } catch {}
+
+      db.prepare(`
+        INSERT INTO activity_audit_log (action, details)
+        VALUES (?, ?)
+      `).run(
+        'FORM_ASSISTANT_MISMATCH_BLOCKED',
+        `Form Assistant blocked promotion to ready_for_review for Job #${job.id} due to ${mismatches.length} DOM mismatch(es): ${mismatches.map(m => m.field).join(', ')}.`
+      );
+
+      return {
+        success: false,
+        mismatchBlocked: true,
+        jobId: job.id,
+        portal: adapter.name,
+        supportLevel: adapter.getSupportLevel(),
+        fieldsFilled: fillResult.fieldsFilled,
+        verification: fillResult.verification,
+        mismatches,
+        resumePdfPath: pdfPath,
+        barrier: barrierCheck.hasBarrier ? barrierCheck : null,
+        browser,
+        page,
+        error: `Field read-back mismatch on ${mismatches.length} field(s): ${mismatches.map(m => m.field).join(', ')}. Manual correction required before review.`
+      };
+    }
+
+    // 5. Update Application Tracker to 'ready_for_review' only when no mismatches exist
     try {
       updateApplicationStatus(job.id, 'ready_for_review', {
-        notes: `Form Assistant filled ${fillResult.fieldsFilled} fields via ${adapter.name}. Verification: ${JSON.stringify(fillResult.verification || [])}`
+        notes: `Form Assistant filled ${fillResult.fieldsFilled} fields via ${adapter.name}. Verification: ${verifiedCount} verified, ${unsupportedCount} unsupported.`
       });
     } catch {}
 
@@ -300,7 +352,7 @@ export async function launchFormAssistant(job, options = {}) {
       VALUES (?, ?)
     `).run(
       'FORM_ASSISTANT_LAUNCHED',
-      `Launched Playwright form assistant for Job #${job.id} (${job.title} @ ${job.company}). Pre-filled ${fillResult.fieldsFilled} fields. Portal: ${adapter.name}. Verification matches: ${(fillResult.verification || []).filter(v => v.status === 'verified_match').length}`
+      `Launched Playwright form assistant for Job #${job.id} (${job.title} @ ${job.company}). Pre-filled ${fillResult.fieldsFilled} fields. Portal: ${adapter.name}. Verification: ${verifiedCount} verified, ${unsupportedCount} unsupported.`
     );
 
     console.log('\n================================================================');

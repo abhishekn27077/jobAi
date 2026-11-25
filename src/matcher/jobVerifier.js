@@ -163,7 +163,14 @@ export async function verifyVaultJobs({ limit = 20, minScore = 70 } = {}) {
     } else if (result.verificationStatus === 'expired') {
       console.log(`❌ Expired (${result.reason})`);
       expiredCount++;
-      db.prepare(`UPDATE jobs SET status = 'expired' WHERE id = ?`).run(job.id);
+      db.prepare(`UPDATE jobs SET status = 'expired', updated_at = datetime('now') WHERE id = ?`).run(job.id);
+      db.prepare(`
+        UPDATE job_evaluations
+        SET recommendation = 'EXPIRED',
+            score = 0,
+            summary_reason = ?
+        WHERE job_id = ?
+      `).run(`Listing expired or closed: ${result.reason}`, job.id);
       db.prepare(`
         INSERT INTO activity_audit_log (action, details)
         VALUES (?, ?)

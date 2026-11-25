@@ -20,6 +20,8 @@ data/*.db-wal
 data/*.db-shm
 data/*.local.json
 data/backups/
+data/test_db/
+scratch/
 data/career_vault_export.json
 data/*.export.json
 data/candidate_profile.local.json
