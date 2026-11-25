@@ -13,10 +13,12 @@ import { getResumeVersionsForJob, saveResumeVersion } from '../resumes/resumeVer
 import { generateTailoredResume, generateTailoredCoverLetter } from '../resumes/resumeGenerator.js';
 import { generateStudioResume } from '../resumes/resumeStudioService.js';
 import { loadCandidateProfile } from '../profile/profileManager.js';
+import { assessApplicationReadiness } from './applicationReadiness.js';
+import { checkResumeAtsQuality } from '../resumes/atsQualityChecker.js';
 import path from 'node:path';
 import fs from 'node:fs';
 
-import { updateApplicationStatus } from '../tracker/applicationTracker.js';
+import { updateApplicationStatus, checkDuplicateApplication } from '../tracker/applicationTracker.js';
 import { normalizeCanonicalUrl } from '../discovery/urlNormalizer.js';
 
 export async function prepareApplication(jobId) {
@@ -153,6 +155,16 @@ export async function prepareApplication(jobId) {
     job.url, jobUrlAlt, canonicalUrl, canonicalUrlAlt,
     job.url, jobUrlAlt, canonicalUrl, canonicalUrlAlt
   );
+
+  const dupCheck = checkDuplicateApplication(job);
+  if (!existingApp && dupCheck.existingApplication) {
+    existingApp = dupCheck.existingApplication;
+  }
+  if (dupCheck.state === 'ALREADY_APPLIED') {
+    warnings.push(`ALREADY APPLIED: ${dupCheck.reason}. Reusing existing application record.`);
+  } else if (dupCheck.state === 'APPLICATION_IN_PROGRESS') {
+    warnings.push(`APPLICATION IN PROGRESS: ${dupCheck.reason}.`);
+  }
   let applicationId;
 
   const now = new Date().toISOString();
@@ -211,9 +223,20 @@ export async function prepareApplication(jobId) {
     `Prepared application dossier for Job #${jobId} (${job.title} @ ${job.company}). Portal: ${portalType} (${supportLevel}). Resume: ${selectedVersion.pdf_path ? path.basename(selectedVersion.pdf_path) : 'v1'}`
   );
 
+  // 10. Compute 3-Tier Application Readiness Assessment
+  const readiness = assessApplicationReadiness(job, existingApp, selectedVersion, evaluation);
+
+  // 11. Compute 14-Dimension Resume ATS Quality Audit
+  const atsQuality = checkResumeAtsQuality(selectedVersion.content, job, {
+    pdfPath: selectedVersion.pdf_path,
+    template: selectedVersion.template
+  });
+
   return {
     applicationId,
     jobId,
+    duplicateState: dupCheck.state,
+    duplicateReason: dupCheck.reason,
     job: {
       id: job.id,
       title: job.title,
@@ -235,6 +258,8 @@ export async function prepareApplication(jobId) {
       matchedSkills: evaluation.matchedSkills,
       missingSkills: evaluation.missingSkills
     },
+    readiness,
+    atsQuality,
     warnings,
     isAutofillAllowed,
     portal: {
@@ -254,6 +279,64 @@ export async function prepareApplication(jobId) {
     screeningAnswers,
     checklist
   };
+}
+
+/**
+ * Generates an end-to-end Application Package bundling all verified assets:
+ * job info, portal details, tailored resume, cover letter, screening answers,
+ * readiness assessment, and step-by-step submission checklist.
+ * Persists the package file to output/packages/job_<jobId>_package.json.
+ */
+export async function generateApplicationPackage(jobId) {
+  const dossier = await prepareApplication(jobId);
+  const profile = loadCandidateProfile();
+
+  const packageDir = path.resolve(process.cwd(), 'output', 'packages');
+  if (!fs.existsSync(packageDir)) {
+    fs.mkdirSync(packageDir, { recursive: true });
+  }
+
+  const packageData = {
+    packageId: `pkg_${jobId}_${Date.now()}`,
+    jobId: dossier.jobId,
+    job: dossier.job,
+    applicant: {
+      name: profile.personal?.fullName || profile.name || 'Abhishek N',
+      email: profile.personal?.email || profile.email || 'abhishek27077@gmail.com',
+      phone: profile.personal?.phone || profile.phone || '+91-8792213854',
+      location: profile.personal?.location || profile.location || 'Bangalore, Karnataka, India',
+      degree: 'MCA (Master of Computer Applications)',
+      gradYear: 2026,
+      profiles: {
+        github: profile.personal?.gitHub || profile.social?.github || 'https://github.com/abhishekn27077',
+        linkedin: profile.personal?.linkedIn || profile.social?.linkedin || 'https://linkedin.com/in/abhishekn27077'
+      }
+    },
+    readiness: dossier.readiness,
+    atsQuality: dossier.atsQuality,
+    resume: {
+      version: dossier.resumeVersion.versionNumber || 1,
+      pdfPath: dossier.resumeVersion.pdfPath,
+      pdfUrl: dossier.resumeVersion.pdfUrl,
+      atsScore: dossier.resumeVersion.atsScore || dossier.evaluation.score
+    },
+    coverLetter: dossier.coverLetter.markdown,
+    screeningAnswers: dossier.screeningAnswers,
+    portal: dossier.portal,
+    submissionChecklist: dossier.checklist,
+    humanApprovalGate: {
+      autoSubmitAllowed: false,
+      reason: 'Human review mandatory before final submission. Bypassing login or CAPTCHA is prohibited.',
+      status: 'pending_user_review'
+    },
+    generatedAt: new Date().toISOString()
+  };
+
+  const packageFilePath = path.join(packageDir, `job_${jobId}_package.json`);
+  fs.writeFileSync(packageFilePath, JSON.stringify(packageData, null, 2), 'utf-8');
+  packageData.packageFilePath = packageFilePath;
+
+  return packageData;
 }
 
 /**

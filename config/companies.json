@@ -82,5 +82,75 @@
     "companyToken": "cohere",
     "location": "Remote / Global",
     "enabled": true
+  },
+  {
+    "name": "Perplexity AI",
+    "portal": "ashby",
+    "companyToken": "perplexity",
+    "location": "Remote / Global",
+    "enabled": true
+  },
+  {
+    "name": "Mercari India",
+    "portal": "workable",
+    "companyToken": "mercari-india",
+    "location": "Bengaluru, India",
+    "enabled": true
+  },
+  {
+    "name": "Velsera",
+    "portal": "workable",
+    "companyToken": "velsera",
+    "location": "Remote, India",
+    "enabled": true
+  },
+  {
+    "name": "YouTrip",
+    "portal": "workable",
+    "companyToken": "youtrip",
+    "location": "Bengaluru / Chennai, India",
+    "enabled": true
+  },
+  {
+    "name": "Smartstream Limited",
+    "portal": "workable",
+    "companyToken": "smartstream",
+    "location": "Bengaluru / Mumbai, India",
+    "enabled": true
+  },
+  {
+    "name": "Zyte",
+    "portal": "workable",
+    "companyToken": "zyte",
+    "location": "Remote / Global",
+    "enabled": true
+  },
+  {
+    "name": "WeatherBug",
+    "portal": "workable",
+    "companyToken": "weatherbug",
+    "location": "Remote, India",
+    "enabled": true
+  },
+  {
+    "name": "bunq",
+    "portal": "recruitee",
+    "companyToken": "bunq",
+    "location": "Remote / Global",
+    "enabled": true
+  },
+  {
+    "name": "Figma",
+    "portal": "greenhouse",
+    "companyToken": "figma",
+    "location": "Remote / Global",
+    "enabled": true
+  },
+  {
+    "name": "GitLab",
+    "portal": "greenhouse",
+    "companyToken": "gitlab",
+    "location": "Remote / Global",
+    "enabled": true
   }
 ]

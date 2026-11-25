@@ -31,10 +31,10 @@ export async function exportToPdf(htmlContent, outputPath) {
       path: outputPath,
       format: 'A4',
       margin: {
-        top: '10mm',
-        right: '12mm',
-        bottom: '10mm',
-        left: '12mm'
+        top: '13mm',
+        right: '14mm',
+        bottom: '13mm',
+        left: '14mm'
       },
       printBackground: true
     });

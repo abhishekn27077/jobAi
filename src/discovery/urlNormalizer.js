@@ -231,6 +231,18 @@ export function extractAtsJobId(rawUrl) {
       if (srMatch) return `sr-${srMatch[1]}`;
     }
 
+    // Workable: apply.workable.com
+    if (host.includes('workable.com')) {
+      const wMatch = pathname.match(/\/j\/([A-Za-z0-9]{8,14})/i);
+      if (wMatch) return `workable-${wMatch[1].toUpperCase()}`;
+    }
+
+    // Recruitee: {company}.recruitee.com/o/{slug}
+    if (host.includes('recruitee.com') || (pathname.includes('/o/') && !host.includes('google'))) {
+      const rMatch = pathname.match(/\/o\/([A-Za-z0-9-_]{4,})/i);
+      if (rMatch) return `recruitee-${rMatch[1]}`;
+    }
+
     // Fallbacks
     const ashbyUuid = pathname.match(/\/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/i);
     if (ashbyUuid) return `ashby-${ashbyUuid[1]}`;

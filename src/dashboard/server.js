@@ -2,8 +2,10 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getJobs, updateJobStatus, getStats, getScanHistory } from '../tracker/jobTracker.js';
+import { getJobs, updateJobStatus, getStats, getScanHistory, saveOrUpdateJob } from '../tracker/jobTracker.js';
 import { runJobDiscovery } from '../discovery/discoveryService.js';
+import { executeUnifiedSearch } from '../discovery/unifiedSearchService.js';
+import { getAllSources, resolveSource, generateAssistedSearchLinks } from '../discovery/sourceRegistry.js';
 import { loadCandidateProfile } from '../profile/profileManager.js';
 import { exportTailoredDocumentsForJob, generateTailoredResume, generateTailoredCoverLetter } from '../resumes/resumeGenerator.js';
 import { launchFormAssistant } from '../automation/formAssistant.js';
@@ -26,8 +28,25 @@ import {
   deleteResumeVersion,
   duplicateResumeVersion
 } from '../resumes/resumeVersionManager.js';
-import { prepareApplication } from '../automation/applicationWorkflow.js';
-import { getApplications, getApplicationByJobId, updateApplicationStatus as updateAppStatus, getPortalSupportMatrix } from '../tracker/applicationTracker.js';
+import { prepareApplication, generateApplicationPackage } from '../automation/applicationWorkflow.js';
+import {
+  discoverRecruitersForJob,
+  saveRecruiterContact,
+  getRecruiterContacts,
+  prepareContactOutreach,
+  updateContactOutreachStatus
+} from '../intelligence/recruiterDiscoveryService.js';
+import { assessApplicationReadiness } from '../automation/applicationReadiness.js';
+import {
+  validateBatchQueue,
+  createBatchSession,
+  getBatchSession,
+  getActiveBatchSession,
+  controlBatchSession
+} from '../automation/batchSessionManager.js';
+import { checkResumeAtsQuality } from '../resumes/atsQualityChecker.js';
+import { saveScreeningAnswerOverride, getScreeningAnswersVault } from '../automation/screeningEngine.js';
+import { getApplications, getApplicationByJobId, updateApplicationStatus as updateAppStatus, getPortalSupportMatrix, checkDuplicateApplication } from '../tracker/applicationTracker.js';
 import { getGoogleAuthUrl, disconnectAccount, getOAuthStatus, exchangeCodeForTokens } from '../email/googleOAuthClient.js';
 import { generateCommunicationDraft, saveDraftToVault, approveAndPublishDraft } from '../email/communicationAssistant.js';
 import { syncRecruiterEmails } from '../email/emailSyncService.js';
@@ -57,6 +76,23 @@ import {
   cleanTestFixtures
 } from '../db/backupService.js';
 import { getDatabase } from '../db/schema.js';
+import {
+  scheduleInterview,
+  updateInterviewStage,
+  getInterviewsForJob,
+  getUpcomingInterviews,
+  getPipelineAnalytics,
+  VALID_INTERVIEW_STAGES
+} from '../interview/pipelineService.js';
+import {
+  getQuestions,
+  getQuestionById,
+  updateQuestionStatus,
+  addQuestion,
+  getQuestionBankStats
+} from '../interview/questionBankService.js';
+import { calculateInterviewReadiness } from '../interview/readinessScorer.js';
+import { generateFollowUpDraft } from '../interview/followUpService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -142,7 +178,10 @@ function parseValidId(paramStr, paramName = 'ID') {
   return num;
 }
 
-export function startDashboardServer(port = 3000, host = '127.0.0.1') {
+export function startDashboardServer(portOrOptions = 3000, hostParam = '127.0.0.1') {
+  const port = typeof portOrOptions === 'object' && portOrOptions !== null ? (portOrOptions.port || 3000) : (portOrOptions || 3000);
+  const host = typeof portOrOptions === 'object' && portOrOptions !== null ? (portOrOptions.host || hostParam || '127.0.0.1') : (hostParam || '127.0.0.1');
+
   const allowedHosts = [
     `${host}:${port}`,
     `localhost:${port}`,
@@ -287,6 +326,122 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
       return;
     }
 
+    // GET /api/sources (Phase 10 Source Registry & Status)
+    if (pathname === '/api/sources' && req.method === 'GET') {
+      try {
+        const q = parsedUrl.searchParams.get('q') || 'Java Developer';
+        const loc = parsedUrl.searchParams.get('location') || 'Bengaluru';
+        const fresherOnly = parsedUrl.searchParams.get('fresherOnly') === 'true';
+
+        const db = getDatabase();
+        const counts = db.prepare('SELECT source, count(*) as count FROM jobs GROUP BY source').all();
+        const countsMap = {};
+        let totalAll = 0;
+        for (const row of counts) {
+          const sDef = resolveSource(row.source);
+          countsMap[sDef.id] = (countsMap[sDef.id] || 0) + row.count;
+          totalAll += row.count;
+        }
+        countsMap.all = totalAll;
+
+        const sources = getAllSources().map(s => ({
+          ...s,
+          count: countsMap[s.id] || 0
+        }));
+
+        const assistedLinks = generateAssistedSearchLinks(q, loc, { fresherOnly });
+        sendJson(200, { sources, assistedLinks, totalJobs: totalAll });
+      } catch (e) {
+        sendJson(500, { error: e.message });
+      }
+      return;
+    }
+
+    // GET /api/search & POST /api/search (Phase 10 Unified Search Engine)
+    if (pathname === '/api/search' && (req.method === 'GET' || req.method === 'POST')) {
+      try {
+        let criteria = {};
+        if (req.method === 'POST') {
+          criteria = await safeReadBody();
+          if (criteria === null) return;
+        } else {
+          const locations = parsedUrl.searchParams.getAll('location');
+          const skillsParam = parsedUrl.searchParams.get('skills');
+          const keywordsParam = parsedUrl.searchParams.get('keywords');
+          const excludedParam = parsedUrl.searchParams.get('excludedKeywords');
+
+          criteria = {
+            q: parsedUrl.searchParams.get('q') || '',
+            title: parsedUrl.searchParams.get('title') || '',
+            company: parsedUrl.searchParams.get('company') || '',
+            location: locations.length > 1 ? locations : (locations[0] || parsedUrl.searchParams.get('location') || 'all'),
+            skills: skillsParam ? skillsParam.split(',').map(s => s.trim()) : [],
+            keywords: keywordsParam ? keywordsParam.split(',').map(s => s.trim()) : [],
+            excludedKeywords: excludedParam ? excludedParam.split(',').map(s => s.trim()) : [],
+            fresherOnly: parsedUrl.searchParams.get('fresherOnly') === 'true',
+            experience: parsedUrl.searchParams.get('experience') || 'any',
+            datePosted: parsedUrl.searchParams.get('datePosted') || 'all',
+            workMode: parsedUrl.searchParams.get('workMode') || 'all',
+            employmentType: parsedUrl.searchParams.get('employmentType') || 'all',
+            salary: parsedUrl.searchParams.get('salary') || 'any',
+            degree: parsedUrl.searchParams.get('degree') || 'all',
+            source: parsedUrl.searchParams.get('source') || 'all',
+            minScore: parseInt(parsedUrl.searchParams.get('minScore') || '0', 10),
+            eligibility: parsedUrl.searchParams.get('eligibility') || 'all',
+            priority: parsedUrl.searchParams.get('priority') || 'all',
+            status: parsedUrl.searchParams.get('status') || 'all',
+            excludeExpired: parsedUrl.searchParams.get('excludeExpired') !== 'false',
+            excludeApplied: parsedUrl.searchParams.get('excludeApplied') === 'true',
+            excludeSaved: parsedUrl.searchParams.get('excludeSaved') === 'true',
+            excludeDismissed: parsedUrl.searchParams.get('excludeDismissed') !== 'false',
+            excludeDuplicates: parsedUrl.searchParams.get('excludeDuplicates') !== 'false',
+            locationRegion: parsedUrl.searchParams.get('locationRegion') || 'all',
+            sort: parsedUrl.searchParams.get('sort') || 'relevance',
+            limit: Math.min(parseInt(parsedUrl.searchParams.get('limit') || '500', 10), 2000),
+            offset: parseInt(parsedUrl.searchParams.get('offset') || '0', 10)
+          };
+        }
+
+        const searchResponse = executeUnifiedSearch(criteria);
+        sendJson(200, searchResponse);
+      } catch (e) {
+        sendJson(500, { error: e.message });
+      }
+      return;
+    }
+
+    // POST /api/job/import-url (Direct User-Assisted Job Import)
+    if (pathname === '/api/job/import-url' && req.method === 'POST') {
+      const body = await safeReadBody();
+      if (body === null) return;
+
+      try {
+        const { url, title, company, location, source, description } = body;
+        if (!url || typeof url !== 'string' || !url.startsWith('http')) {
+          sendJson(400, { error: 'Bad Request: A valid HTTP/HTTPS URL is required.' });
+          return;
+        }
+
+        const sourceDef = resolveSource(source || url);
+        const importedJob = {
+          title: (title || 'Imported Job Opportunity').trim(),
+          company: (company || 'External Employer').trim(),
+          location: (location || 'Bengaluru, India').trim(),
+          url: url.trim(),
+          source: sourceDef.id,
+          sourceConfidence: sourceDef.tier === 'direct_ats' ? 1.0 : 0.85,
+          description: description || `Imported listing from ${sourceDef.name}: ${url}`,
+          status: 'discovered'
+        };
+
+        const result = saveOrUpdateJob(importedJob);
+        sendJson(200, { success: true, ...result });
+      } catch (e) {
+        sendJson(500, { error: e.message });
+      }
+      return;
+    }
+
     // GET /api/scan-history
     if (pathname === '/api/scan-history' && req.method === 'GET') {
       try {
@@ -420,6 +575,128 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
         sendJson(200, { success: true, dossier });
       } catch (e) {
         sendJson(e.statusCode || 500, { error: e.message });
+      }
+      return;
+    }
+
+    // GET /api/job/:id/readiness (Phase 13 Application Readiness Assessment)
+    if (pathname.startsWith('/api/job/') && pathname.endsWith('/readiness') && req.method === 'GET') {
+      try {
+        const jobId = parseValidId(pathname.split('/')[3], 'Job ID');
+        const db = getDatabase();
+        const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(jobId);
+        if (!job) {
+          sendJson(404, { success: false, error: 'Job not found' });
+          return;
+        }
+        const app = getApplicationByJobId(jobId);
+        const versions = getResumeVersionsForJob(jobId);
+        const selectedVer = versions.find(v => v.is_approved === 1) || versions[0] || null;
+        const evaluation = evaluateJobFit(job);
+        const readiness = assessApplicationReadiness(job, app, selectedVer, evaluation);
+        sendJson(200, { success: true, readiness });
+      } catch (e) {
+        sendJson(e.statusCode || 500, { success: false, error: e.message });
+      }
+      return;
+    }
+
+    // GET /api/job/:id/application-package (Phase 13 Full Application Package Generator)
+    if (pathname.startsWith('/api/job/') && pathname.endsWith('/application-package') && req.method === 'GET') {
+      try {
+        const jobId = parseValidId(pathname.split('/')[3], 'Job ID');
+        const packageData = await generateApplicationPackage(jobId);
+        sendJson(200, { success: true, package: packageData });
+      } catch (e) {
+        sendJson(e.statusCode || 500, { success: false, error: e.message });
+      }
+      return;
+    }
+
+    // GET /api/job/:id/resume-ats-check (Phase 13 14-Dimension ATS Quality Audit)
+    if (pathname.startsWith('/api/job/') && pathname.endsWith('/resume-ats-check') && req.method === 'GET') {
+      try {
+        const jobId = parseValidId(pathname.split('/')[3], 'Job ID');
+        const db = getDatabase();
+        const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(jobId);
+        if (!job) {
+          sendJson(404, { success: false, error: 'Job not found' });
+          return;
+        }
+        const versions = getResumeVersionsForJob(jobId);
+        const selectedVer = versions.find(v => v.is_approved === 1) || versions[0] || null;
+        let resumeContent = selectedVer?.content;
+        if (!resumeContent) {
+          const studio = await generateStudioResume(job);
+          resumeContent = studio.content;
+        }
+        const atsReport = checkResumeAtsQuality(resumeContent, job, {
+          pdfPath: selectedVer?.pdf_path,
+          template: selectedVer?.template || 'ats_professional'
+        });
+        sendJson(200, { success: true, atsReport });
+      } catch (e) {
+        sendJson(e.statusCode || 500, { success: false, error: e.message });
+      }
+      return;
+    }
+
+    // POST /api/job/:id/answers (Phase 13 Screening Answer Overrides & Vault)
+    if (pathname.startsWith('/api/job/') && pathname.endsWith('/answers') && req.method === 'POST') {
+      const body = await safeReadBody();
+      if (body === null) return;
+      try {
+        const jobId = parseValidId(pathname.split('/')[3], 'Job ID');
+        const { questionKey, answerText } = body;
+        if (!questionKey || !answerText) {
+          sendJson(400, { success: false, error: 'questionKey and answerText are required.' });
+          return;
+        }
+        saveScreeningAnswerOverride(questionKey, answerText);
+        sendJson(200, { success: true, message: 'Screening answer updated in vault.' });
+      } catch (e) {
+        sendJson(e.statusCode || 500, { success: false, error: e.message });
+      }
+      return;
+    }
+
+    // POST /api/job/:id/ats-resume-instant (Phase 13 Instant ATS Resume Generator)
+    if (pathname.startsWith('/api/job/') && pathname.endsWith('/ats-resume-instant') && req.method === 'POST') {
+      try {
+        const jobId = parseValidId(pathname.split('/')[3], 'Job ID');
+        const db = getDatabase();
+        const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(jobId);
+        if (!job) {
+          sendJson(404, { success: false, error: 'Job not found' });
+          return;
+        }
+        const studioRes = await generateStudioResume(job, { template: 'ats_professional' });
+        const savedVer = await saveResumeVersion({
+          jobId,
+          company: job.company,
+          jobTitle: job.title,
+          jdSnapshot: { title: job.title, company: job.company, description: job.description },
+          template: 'ats_professional',
+          generationMode: studioRes.generationMode,
+          content: studioRes.content,
+          atsScore: studioRes.atsScore?.overallScore || 85,
+          atsBreakdown: studioRes.atsScore?.breakdown || {},
+          matchedKeywords: studioRes.atsScore?.matchedSkills || [],
+          missingKeywords: studioRes.atsScore?.missingSkills || []
+        });
+        const atsQuality = checkResumeAtsQuality(studioRes.content, job, {
+          pdfPath: savedVer.pdf_path,
+          template: 'ats_professional'
+        });
+        sendJson(200, {
+          success: true,
+          message: 'ATS Resume successfully generated and compiled to PDF.',
+          resumeVersion: savedVer,
+          pdfUrl: `/api/download/resume/${jobId}`,
+          atsQuality
+        });
+      } catch (e) {
+        sendJson(e.statusCode || 500, { success: false, error: e.message });
       }
       return;
     }
@@ -1111,6 +1388,141 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
       return;
     }
 
+    // GET /api/interviews
+    if (pathname === '/api/interviews' && req.method === 'GET') {
+      try {
+        const jobId = parsedUrl.searchParams.get('jobId');
+        const upcoming = parsedUrl.searchParams.get('upcoming') === 'true';
+        let interviews = [];
+        if (jobId) {
+          interviews = getInterviewsForJob(parseValidId(jobId, 'Job ID'));
+        } else if (upcoming) {
+          interviews = getUpcomingInterviews(parseInt(parsedUrl.searchParams.get('limit') || '10', 10));
+        } else {
+          interviews = getUpcomingInterviews(50);
+        }
+        const analytics = getPipelineAnalytics();
+        sendJson(200, { success: true, interviews, analytics });
+      } catch (e) {
+        sendJson(500, { error: e.message });
+      }
+      return;
+    }
+
+    // POST /api/interviews
+    if (pathname === '/api/interviews' && req.method === 'POST') {
+      const body = await safeReadBody();
+      if (body === null) return;
+      try {
+        const { jobId, roundName, stage, scheduledAt, interviewMode, interviewerInfo, meetingLink, timezone, prepNotes, confirmedByUser } = body;
+        if (!jobId) {
+          sendJson(400, { error: 'jobId is required' });
+          return;
+        }
+        const result = scheduleInterview(parseValidId(jobId, 'Job ID'), {
+          roundName,
+          stage,
+          scheduledAt,
+          interviewMode,
+          interviewerInfo,
+          meetingLink,
+          timezone,
+          prepNotes,
+          confirmedByUser
+        });
+        if (!result.success && result.duplicateDetected) {
+          sendJson(409, result);
+          return;
+        }
+        sendJson(201, result);
+      } catch (e) {
+        sendJson(e.statusCode || 400, { error: e.message });
+      }
+      return;
+    }
+
+    // PATCH /api/interviews/:id
+    if (pathname.startsWith('/api/interviews/') && !pathname.includes('follow-up') && !pathname.includes('readiness') && req.method === 'PATCH') {
+      const body = await safeReadBody();
+      if (body === null) return;
+      try {
+        const interviewId = parseValidId(pathname.split('/')[3], 'Interview ID');
+        const updated = updateInterviewStage(interviewId, body.stage, body);
+        sendJson(200, { success: true, interview: updated });
+      } catch (e) {
+        sendJson(e.statusCode || 400, { error: e.message });
+      }
+      return;
+    }
+
+    // GET /api/interviews/readiness/:jobId
+    if (pathname.startsWith('/api/interviews/readiness/') && req.method === 'GET') {
+      try {
+        const jobId = parseValidId(pathname.split('/')[4], 'Job ID');
+        const readiness = calculateInterviewReadiness(jobId);
+        sendJson(200, { success: true, readiness });
+      } catch (e) {
+        sendJson(e.statusCode || 500, { error: e.message });
+      }
+      return;
+    }
+
+    // GET /api/question-bank
+    if (pathname === '/api/question-bank' && req.method === 'GET') {
+      try {
+        const category = parsedUrl.searchParams.get('category');
+        const difficulty = parsedUrl.searchParams.get('difficulty');
+        const search = parsedUrl.searchParams.get('search');
+        const isSaved = parsedUrl.searchParams.get('isSaved');
+        const reviewedStatus = parsedUrl.searchParams.get('reviewedStatus');
+        const limit = parseInt(parsedUrl.searchParams.get('limit') || '50', 10);
+        const offset = parseInt(parsedUrl.searchParams.get('offset') || '0', 10);
+
+        const result = getQuestions({
+          category,
+          difficulty,
+          search,
+          isSaved: isSaved !== null ? (isSaved === 'true' || isSaved === '1') : undefined,
+          reviewedStatus,
+          limit,
+          offset
+        });
+        const stats = getQuestionBankStats();
+        sendJson(200, { success: true, ...result, stats });
+      } catch (e) {
+        sendJson(500, { error: e.message });
+      }
+      return;
+    }
+
+    // POST /api/question-bank/:id/status
+    if (pathname.startsWith('/api/question-bank/') && pathname.endsWith('/status') && req.method === 'POST') {
+      const body = await safeReadBody();
+      if (body === null) return;
+      try {
+        const questionId = parseValidId(pathname.split('/')[3], 'Question ID');
+        const updated = updateQuestionStatus(questionId, body);
+        sendJson(200, { success: true, question: updated });
+      } catch (e) {
+        sendJson(e.statusCode || 400, { error: e.message });
+      }
+      return;
+    }
+
+    // POST /api/interviews/:id/follow-up-draft
+    if (pathname.startsWith('/api/interviews/') && pathname.endsWith('/follow-up-draft') && req.method === 'POST') {
+      const body = await safeReadBody();
+      if (body === null) return;
+      try {
+        const interviewId = parseValidId(pathname.split('/')[3], 'Interview ID');
+        const draft = generateFollowUpDraft(interviewId, body.type || 'post_technical', body);
+        sendJson(200, { success: true, draft });
+      } catch (e) {
+        sendJson(e.statusCode || 400, { error: e.message });
+      }
+      return;
+    }
+
     // POST /api/job/:id/referral
     if (pathname.startsWith('/api/job/') && pathname.endsWith('/referral') && req.method === 'POST') {
       const body = await safeReadBody();
@@ -1558,6 +1970,170 @@ export function startDashboardServer(port = 3000, host = '127.0.0.1') {
         sendJson(200, result);
       } catch (e) {
         sendJson(500, { error: e.message });
+      }
+      return;
+    }
+
+    // ==========================================
+    // BATCH APPLICATION PREPARATION ASSISTANT (PHASE 14)
+    // ==========================================
+    if (pathname === '/api/batch-session/validate' && req.method === 'POST') {
+      const body = await safeReadBody();
+      if (body === null) return;
+      try {
+        const validation = validateBatchQueue(body || {});
+        sendJson(200, { success: true, validation });
+      } catch (e) {
+        sendJson(e.statusCode || 400, { success: false, error: e.message });
+      }
+      return;
+    }
+
+    if (pathname === '/api/batch-session/create' && req.method === 'POST') {
+      const body = await safeReadBody();
+      if (body === null) return;
+      try {
+        const session = createBatchSession(body || {});
+        sendJson(200, { success: true, session });
+      } catch (e) {
+        sendJson(e.statusCode || 400, { success: false, error: e.message });
+      }
+      return;
+    }
+
+    if (pathname === '/api/batch-session/active' && req.method === 'GET') {
+      try {
+        const session = getActiveBatchSession();
+        sendJson(200, { success: true, session });
+      } catch (e) {
+        sendJson(500, { success: false, error: e.message });
+      }
+      return;
+    }
+
+    if (pathname.startsWith('/api/batch-session/') && pathname.endsWith('/control') && req.method === 'POST') {
+      const body = await safeReadBody();
+      if (body === null) return;
+      try {
+        const sessionId = parseValidId(pathname.split('/')[3], 'Session ID');
+        const session = await controlBatchSession(sessionId, body.action, body);
+        sendJson(200, { success: true, session });
+      } catch (e) {
+        sendJson(e.statusCode || 400, { success: false, error: e.message });
+      }
+      return;
+    }
+
+    if (pathname.startsWith('/api/job/') && pathname.endsWith('/duplicate-check') && req.method === 'GET') {
+      try {
+        const jobId = parseValidId(pathname.split('/')[3], 'Job ID');
+        const dup = checkDuplicateApplication(jobId);
+        sendJson(200, { success: true, ...dup });
+      } catch (e) {
+        sendJson(e.statusCode || 400, { success: false, error: e.message });
+      }
+      return;
+    }
+
+    // RECRUITER HUB — CONTACT DISCOVERY & OUTREACH
+    if (pathname === '/api/recruiter-hub/contacts' && req.method === 'GET') {
+      try {
+        const company = parsedUrl.searchParams.get('company') || null;
+        const jobId = parsedUrl.searchParams.get('jobId') ? parseValidId(parsedUrl.searchParams.get('jobId'), 'Job ID') : null;
+        sendJson(200, { success: true, contacts: getRecruiterContacts({ company, jobId }) });
+      } catch (e) {
+        sendJson(400, { success: false, error: e.message });
+      }
+      return;
+    }
+
+    if (pathname === '/api/recruiter-hub/contacts' && req.method === 'POST') {
+      const body = await safeReadBody();
+      if (body === null) return;
+      try {
+        const contact = saveRecruiterContact(body || {});
+        sendJson(200, { success: true, contact });
+      } catch (e) {
+        sendJson(400, { success: false, error: e.message });
+      }
+      return;
+    }
+
+    if (pathname.startsWith('/api/recruiter-hub/discover/') && req.method === 'POST') {
+      try {
+        const jobId = parseValidId(pathname.split('/')[4], 'Job ID');
+        const discovery = discoverRecruitersForJob(jobId);
+        sendJson(200, { success: true, ...discovery });
+      } catch (e) {
+        sendJson(400, { success: false, error: e.message });
+      }
+      return;
+    }
+
+    if (pathname.startsWith('/api/recruiter-hub/contacts/') && pathname.endsWith('/outreach-draft') && req.method === 'POST') {
+      const body = await safeReadBody();
+      if (body === null) return;
+      try {
+        const contactId = parseValidId(pathname.split('/')[4], 'Contact ID');
+        const result = prepareContactOutreach(contactId, body || {});
+        sendJson(200, { success: true, ...result });
+      } catch (e) {
+        sendJson(400, { success: false, error: e.message });
+      }
+      return;
+    }
+
+    if (pathname.startsWith('/api/recruiter-hub/contacts/') && pathname.endsWith('/outreach-status') && req.method === 'POST') {
+      const body = await safeReadBody();
+      if (body === null) return;
+      try {
+        const contactId = parseValidId(pathname.split('/')[4], 'Contact ID');
+        const contact = updateContactOutreachStatus(contactId, body.status, body);
+        sendJson(200, { success: true, contact });
+      } catch (e) {
+        sendJson(400, { success: false, error: e.message });
+      }
+      return;
+    }
+
+    // SAVED SEARCHES
+    if (pathname === '/api/saved-searches' && req.method === 'GET') {
+      try {
+        const db = getDatabase();
+        const rows = db.prepare('SELECT * FROM saved_searches ORDER BY id DESC LIMIT 20').all();
+        sendJson(200, { success: true, savedSearches: rows.map(r => ({ ...r, filters: r.filters_json ? JSON.parse(r.filters_json) : {} })) });
+      } catch (e) {
+        sendJson(500, { success: false, error: e.message });
+      }
+      return;
+    }
+
+    if (pathname === '/api/saved-searches' && req.method === 'POST') {
+      const body = await safeReadBody();
+      if (body === null) return;
+      try {
+        const db = getDatabase();
+        const name = (body.name || body.query || 'Saved Search').trim().slice(0, 80);
+        const info = db.prepare('INSERT INTO saved_searches (name, query, filters_json) VALUES (?, ?, ?)').run(
+          name,
+          body.query || '',
+          JSON.stringify(body.filters || {})
+        );
+        sendJson(200, { success: true, id: info.lastInsertRowid, name });
+      } catch (e) {
+        sendJson(400, { success: false, error: e.message });
+      }
+      return;
+    }
+
+    if (pathname.startsWith('/api/saved-searches/') && req.method === 'DELETE') {
+      try {
+        const id = parseValidId(pathname.split('/')[3], 'Saved Search ID');
+        const db = getDatabase();
+        db.prepare('DELETE FROM saved_searches WHERE id = ?').run(id);
+        sendJson(200, { success: true });
+      } catch (e) {
+        sendJson(400, { success: false, error: e.message });
       }
       return;
     }

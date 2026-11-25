@@ -1,6 +1,8 @@
 import { normalizeCanonicalUrl, normalizeLocation } from './urlNormalizer.js';
 export { fetchLeverJobs } from './leverClient.js';
 export { fetchAshbyJobs } from './ashbyClient.js';
+export { fetchWorkableJobs } from './workableClient.js';
+export { fetchRecruiteeJobs } from './recruiteeClient.js';
 
 export async function fetchSmartRecruitersJobs(companyToken, query = 'Java') {
   const cleanToken = companyToken.trim();

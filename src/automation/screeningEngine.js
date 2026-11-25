@@ -1,14 +1,60 @@
 /**
- * CareerOS — Screening Answer Intelligence Engine
+ * CareerOS — Screening Answer Intelligence Engine (Phase 13)
  * Generates transparent, evidence-grounded screening answers using exclusively verified
  * candidate profile data. Strictly prohibits fabrication or unverified experience inflation.
+ * Includes reusable answer vault persistence across applications.
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { loadCandidateProfile } from '../profile/profileManager.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const VAULT_PATH = path.resolve(__dirname, '../../data/screening_answers_vault.json');
+
+/**
+ * Loads persistent customized screening answer overrides from vault.
+ */
+export function getScreeningAnswersVault() {
+  try {
+    if (fs.existsSync(VAULT_PATH)) {
+      const data = fs.readFileSync(VAULT_PATH, 'utf-8');
+      return JSON.parse(data);
+    }
+  } catch (err) {
+    console.warn(`[ScreeningEngine] Could not read answers vault: ${err.message}`);
+  }
+  return {};
+}
+
+/**
+ * Saves or updates a customized screening answer in the persistent vault.
+ */
+export function saveScreeningAnswerOverride(questionKey, answerText) {
+  try {
+    const vault = getScreeningAnswersVault();
+    vault[questionKey] = {
+      answer: answerText,
+      updatedAt: new Date().toISOString()
+    };
+    const dir = path.dirname(VAULT_PATH);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(VAULT_PATH, JSON.stringify(vault, null, 2), 'utf-8');
+    return true;
+  } catch (err) {
+    console.error(`[ScreeningEngine] Error saving to answers vault: ${err.message}`);
+    return false;
+  }
+}
 
 export function generateScreeningAnswers(job, customQuestions = []) {
   const profile = loadCandidateProfile();
+  const vault = getScreeningAnswersVault();
   const answers = {};
+  const compName = job?.company || 'your organization';
+  const roleName = job?.title || 'Software Engineer';
 
   // Standard screening question catalog matched against verified profile
   const standardQuestions = [
@@ -26,6 +72,14 @@ export function generateScreeningAnswers(job, customQuestions = []) {
       answer: 'No, I do not require visa sponsorship now or in the future for employment in India.',
       confidence: 'high',
       evidence: 'candidate_profile.json -> status.workAuthorization ("Citizen of India")',
+      requiresUserInput: false
+    },
+    {
+      key: 'total_experience',
+      patterns: [/total.*years of experience/i, /years of (full[- ]time )?experience/i, /how many years.*experience/i],
+      answer: 'Fresher (0 years of full-time professional experience). Completed an Advanced Java Full Stack internship at Anudip Foundation (Bangalore) and hands-on academic projects during MCA.',
+      confidence: 'high',
+      evidence: 'candidate_profile.json -> status.fresherProfile (MCA 2026)',
       requiresUserInput: false
     },
     {
@@ -95,9 +149,33 @@ export function generateScreeningAnswers(job, customQuestions = []) {
     {
       key: 'why_company',
       patterns: [/why do you want to work (here|at|for)/i, /why are you interested in this role/i],
-      answer: `I am eager to contribute my hands-on Java, Spring Boot, and React skills to ${job.company || 'your team'}. My MCA project (NearVia) and Anudip Foundation internship trained me in building scalable REST APIs and high-availability systems, which directly aligns with your engineering requirements.`,
+      answer: `I am eager to contribute my hands-on Java, Spring Boot, and React skills to ${compName}. My MCA project (NearVia) and Anudip Foundation internship trained me in building scalable REST APIs and high-availability systems, which directly aligns with your engineering requirements.`,
       confidence: 'high',
       evidence: 'Grounded alignment between verified profile and target company role',
+      requiresUserInput: false
+    },
+    {
+      key: 'tell_me_about_yourself',
+      patterns: [/tell (us|me) about yourself/i, /walk (us|me) through your resume/i, /brief introduction/i],
+      answer: 'I am an MCA candidate (Class of 2026) specializing in Java Full Stack development. I have hands-on experience building backend APIs using Spring Boot and relational databases, alongside interactive frontends in React.js. I completed an internship at Anudip Foundation focused on core enterprise Java, and engineered projects including an Employee Leave Management System and a Spatial Query Engine.',
+      confidence: 'high',
+      evidence: 'Grounded summary of candidate profile, education, internship, and core projects',
+      requiresUserInput: false
+    },
+    {
+      key: 'describe_project',
+      patterns: [/describe a project/i, /challenging project/i, /technical achievement/i],
+      answer: 'In my Employee Leave Management System project built with Java and Spring Boot, I designed relational database schemas, implemented role-based access control, and built clean RESTful endpoints to manage leave workflows with validation logic. I focused on clean modular architecture, input sanitization, and automated test coverage.',
+      confidence: 'high',
+      evidence: 'candidate_profile.json -> projects[2] (Employee Leave Management System)',
+      requiresUserInput: false
+    },
+    {
+      key: 'strengths_weaknesses',
+      patterns: [/strengths (and|or) weaknesses/i, /greatest strength/i],
+      answer: 'My greatest strength is disciplined software engineering fundamentals: strong OOP foundations in Java, relational data modeling, and a methodical approach to debugging and test-driven development. As an area for improvement, I am continuously broadening my real-time distributed systems knowledge as I transition from academic projects to enterprise codebases.',
+      confidence: 'high',
+      evidence: 'Grounded self-assessment based on verified MCA skillset',
       requiresUserInput: false
     }
   ];
@@ -108,14 +186,28 @@ export function generateScreeningAnswers(job, customQuestions = []) {
       const qText = typeof q === 'string' ? q : (q.text || q.label || q.question || '');
       let matched = false;
 
+      // Check vault first for user overrides
+      if (vault[qText] && vault[qText].answer) {
+        answers[qText] = {
+          question: qText,
+          answer: vault[qText].answer,
+          confidence: 'high (user customized)',
+          evidence: 'Persistent screening answer vault',
+          requiresUserInput: false
+        };
+        continue;
+      }
+
       for (const std of standardQuestions) {
         if (std.patterns.some(p => p.test(qText))) {
+          // Check if vault overrides this key
+          const override = vault[std.key]?.answer;
           answers[qText] = {
             question: qText,
-            answer: std.answer,
-            confidence: std.confidence,
-            evidence: std.evidence,
-            requiresUserInput: std.requiresUserInput
+            answer: override || std.answer,
+            confidence: override ? 'high (user customized)' : std.confidence,
+            evidence: override ? 'Persistent screening answer vault' : std.evidence,
+            requiresUserInput: override ? false : std.requiresUserInput
           };
           matched = true;
           break;
@@ -136,12 +228,13 @@ export function generateScreeningAnswers(job, customQuestions = []) {
   } else {
     // Return standard catalog keyed by key
     for (const std of standardQuestions) {
+      const override = vault[std.key]?.answer;
       answers[std.key] = {
         question: std.key,
-        answer: std.answer,
-        confidence: std.confidence,
-        evidence: std.evidence,
-        requiresUserInput: std.requiresUserInput
+        answer: override || std.answer,
+        confidence: override ? 'high (user customized)' : std.confidence,
+        evidence: override ? 'Persistent screening answer vault' : std.evidence,
+        requiresUserInput: override ? false : std.requiresUserInput
       };
     }
   }
@@ -165,7 +258,7 @@ export function validateAnswerTruthfulness(answer, profile) {
   }
 
   // 2. Experience years fabrication check (flag claiming >= 1 years of professional/work/full-time experience)
-  const expMatch = text.match(/(\d+)\+?\s*years?\s*of\s*(professional|work|industry|full[- ]time)\s*experience/i);
+  const expMatch = text.match(/(\d+)\+?\s*years?\s*(?:of\s*)?(?:[a-z-]+\s+)*(?:experience|industry|work|employment)/i);
   if (expMatch && parseInt(expMatch[1], 10) >= 1) {
     issues.push(`Answer claims ${expMatch[1]} years of professional experience, exceeding candidate's verified fresher status (0 years full-time experience).`);
   }
@@ -185,4 +278,3 @@ export function validateAnswerTruthfulness(answer, profile) {
     issues
   };
 }
-

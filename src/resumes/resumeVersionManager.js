@@ -45,6 +45,24 @@ export async function saveResumeVersion({
     throw err;
   }
 
+  // Caching: Reuse existing identical resume version if template, content, and compiled PDF already exist
+  const serializedContent = typeof content === 'string' ? content : JSON.stringify(content);
+  const existingLatest = db.prepare(`
+    SELECT * FROM resume_versions
+    WHERE job_id = ? AND template = ?
+    ORDER BY version_number DESC LIMIT 1
+  `).get(jobId, template);
+
+  if (existingLatest && existingLatest.resume_content_json === serializedContent && existingLatest.pdf_path && fs.existsSync(existingLatest.pdf_path)) {
+    return {
+      ...existingLatest,
+      id: existingLatest.id,
+      versionId: existingLatest.id,
+      versionNumber: existingLatest.version_number,
+      cached: true
+    };
+  }
+
   // Find next version number for this job
   const existingMax = db.prepare('SELECT MAX(version_number) as max_v FROM resume_versions WHERE job_id = ?').get(jobId);
   const nextVersion = (existingMax && existingMax.max_v !== null) ? (existingMax.max_v + 1) : 1;

@@ -1,5 +1,15 @@
 import { getAllCandidateSkills, loadCandidateProfile } from '../profile/profileManager.js';
 import { classifyDegreeRequirement, DEGREE_CLASSIFICATIONS, ELIGIBILITY_STATUSES } from './degreeClassifier.js';
+import {
+  detectListingQuality,
+  classifyJobEligibility,
+  calculateJobPriority,
+  generateExplainableMatch,
+  calculateEvidenceBreakdown,
+  ELIGIBILITY_TIERS,
+  PRIORITY_TIERS,
+  LOW_QUALITY_FLAGS
+} from './qualityDetector.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -234,6 +244,22 @@ export function evaluateJobFit(job) {
 
   const summaryReason = reasons.join(' ');
 
+  // Phase 12: Quality Assessment, Eligibility Classification, Priority Tier, and Grounded Explanations
+  const qualityResult = detectListingQuality(job);
+  const jobEligibilityResult = classifyJobEligibility(job, degreeEval);
+
+  const partialEval = {
+    score: (isExpired || degreeEval.isStrictlyIneligible) ? 0 : compositeScore,
+    jobEligibility: jobEligibilityResult.tier,
+    breakdown: { seniorityScore, skillsScore, locationScore, roleScore },
+    matchedSkills,
+    missingSkills
+  };
+
+  const priorityResult = calculateJobPriority(job, partialEval, qualityResult);
+  const explainableResult = generateExplainableMatch(job, partialEval, qualityResult);
+  const evidenceBreakdown = calculateEvidenceBreakdown(job, partialEval, qualityResult, degreeEval);
+
   return {
     score: (isExpired || degreeEval.isStrictlyIneligible) ? 0 : compositeScore,
     rating: (isExpired || degreeEval.isStrictlyIneligible) ? 1 : rating,
@@ -249,7 +275,24 @@ export function evaluateJobFit(job) {
       skillsScore,
       locationScore,
       roleScore
-    }
+    },
+    // Phase 12 Smart Prioritization & Job Quality Intelligence
+    jobEligibility: jobEligibilityResult.tier,
+    jobEligibilityReason: jobEligibilityResult.reason,
+    isConfirmedEligible: jobEligibilityResult.isConfirmedEligible,
+    priorityTier: priorityResult.tier,
+    priorityCode: priorityResult.tierCode,
+    priorityRank: priorityResult.priorityRank,
+    priorityBadgeColor: priorityResult.badgeColor,
+    priorityBadgeIcon: priorityResult.badgeIcon,
+    priorityReasons: priorityResult.reasons,
+    qualityScore: qualityResult.qualityScore,
+    authenticityTier: qualityResult.authenticityTier,
+    qualityFlags: qualityResult.flags,
+    whyMatches: explainableResult.whyMatches,
+    concerns: explainableResult.concerns,
+    evidenceBreakdown: evidenceBreakdown.factors,
+    jobQualityScore: evidenceBreakdown.totalScore
   };
 }
 

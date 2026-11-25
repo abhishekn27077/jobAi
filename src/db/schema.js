@@ -223,8 +223,18 @@ function initSchema(db) {
       confirmed_by_user INTEGER DEFAULT 0,
       meeting_link TEXT,
       status TEXT DEFAULT 'scheduled',
+      stage TEXT DEFAULT 'recruiter_screening',
+      interview_mode TEXT DEFAULT 'video',
+      interviewer_info TEXT,
+      prep_status TEXT DEFAULT 'pending',
+      outcome TEXT DEFAULT 'pending',
+      next_action TEXT,
+      follow_up_date TEXT,
+      timezone TEXT DEFAULT 'Asia/Kolkata',
+      questions_json TEXT,
       prep_notes TEXT,
       created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
     );
 
@@ -302,6 +312,25 @@ function initSchema(db) {
       qa_log_json TEXT,
       status TEXT DEFAULT 'completed',
       created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS interview_question_bank (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      category TEXT NOT NULL,
+      topic TEXT NOT NULL,
+      question TEXT NOT NULL,
+      sample_answer TEXT NOT NULL,
+      key_concepts_json TEXT DEFAULT '[]',
+      difficulty TEXT DEFAULT 'junior',
+      tags_json TEXT DEFAULT '[]',
+      is_saved INTEGER DEFAULT 0,
+      reviewed_status TEXT DEFAULT 'unreviewed',
+      user_notes TEXT,
+      revision_count INTEGER DEFAULT 0,
+      job_id INTEGER,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE SET NULL
     );
 
@@ -418,7 +447,17 @@ function initSchema(db) {
     "ALTER TABLE communications ADD COLUMN confidence TEXT DEFAULT 'high'",
     "ALTER TABLE communications ADD COLUMN requires_manual_review INTEGER DEFAULT 0",
     "ALTER TABLE communications ADD COLUMN received_at TEXT",
-    "ALTER TABLE communications ADD COLUMN updated_at TEXT DEFAULT (datetime('now'))"
+    "ALTER TABLE communications ADD COLUMN updated_at TEXT DEFAULT (datetime('now'))",
+    "ALTER TABLE interviews ADD COLUMN stage TEXT DEFAULT 'recruiter_screening'",
+    "ALTER TABLE interviews ADD COLUMN interview_mode TEXT DEFAULT 'video'",
+    "ALTER TABLE interviews ADD COLUMN interviewer_info TEXT",
+    "ALTER TABLE interviews ADD COLUMN prep_status TEXT DEFAULT 'pending'",
+    "ALTER TABLE interviews ADD COLUMN outcome TEXT DEFAULT 'pending'",
+    "ALTER TABLE interviews ADD COLUMN next_action TEXT",
+    "ALTER TABLE interviews ADD COLUMN follow_up_date TEXT",
+    "ALTER TABLE interviews ADD COLUMN timezone TEXT DEFAULT 'Asia/Kolkata'",
+    "ALTER TABLE interviews ADD COLUMN questions_json TEXT",
+    "ALTER TABLE interviews ADD COLUMN updated_at TEXT"
   ];
   for (const sql of migrations) {
     try {
@@ -447,6 +486,71 @@ function initSchema(db) {
       CREATE INDEX IF NOT EXISTS idx_reminders_due ON follow_up_reminders(due_date);
       CREATE INDEX IF NOT EXISTS idx_reminders_status ON follow_up_reminders(status);
       CREATE INDEX IF NOT EXISTS idx_reminders_job ON follow_up_reminders(job_id);
+      CREATE INDEX IF NOT EXISTS idx_interviews_job ON interviews(job_id);
+      CREATE INDEX IF NOT EXISTS idx_interviews_stage ON interviews(stage);
+      CREATE INDEX IF NOT EXISTS idx_interviews_sched ON interviews(scheduled_at);
+      CREATE INDEX IF NOT EXISTS idx_qbank_category ON interview_question_bank(category);
+      CREATE INDEX IF NOT EXISTS idx_qbank_saved ON interview_question_bank(is_saved);
+      CREATE INDEX IF NOT EXISTS idx_qbank_reviewed ON interview_question_bank(reviewed_status);
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS batch_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT,
+        status TEXT DEFAULT 'idle',
+        selection_mode TEXT DEFAULT 'selected',
+        total_count INTEGER DEFAULT 0,
+        current_index INTEGER DEFAULT 0,
+        summary_json TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS batch_session_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id INTEGER NOT NULL,
+        job_id INTEGER NOT NULL,
+        priority_rank INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'queued',
+        pause_reason TEXT,
+        resume_version TEXT,
+        notes TEXT,
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (session_id) REFERENCES batch_sessions(id) ON DELETE CASCADE,
+        FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS saved_searches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        query TEXT,
+        filters_json TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS recruiter_contacts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_id INTEGER,
+        company TEXT NOT NULL,
+        name TEXT,
+        role TEXT,
+        email TEXT,
+        verification_status TEXT DEFAULT 'Unverified',
+        discovery_source TEXT,
+        source_url TEXT,
+        confidence TEXT DEFAULT 'low',
+        outreach_status TEXT DEFAULT 'Not Contacted',
+        contact_history_json TEXT DEFAULT '[]',
+        date_discovered TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE SET NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_batch_items_session ON batch_session_items(session_id);
+      CREATE INDEX IF NOT EXISTS idx_batch_items_job ON batch_session_items(job_id);
+      CREATE INDEX IF NOT EXISTS idx_recruiter_contacts_company ON recruiter_contacts(company);
+      CREATE INDEX IF NOT EXISTS idx_recruiter_contacts_job ON recruiter_contacts(job_id);
     `);
   } catch {
     // Safe fallback

@@ -9,31 +9,66 @@
 <body>
   <header class="navbar">
     <div class="brand">
-      <div class="logo-icon">🎯</div>
+      <div class="logo-icon" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+      </div>
       <div class="brand-text">
         <h1>CareerOS</h1>
-        <span class="subtext">Personal AI Job Search & Application Workspace</span>
+        <span class="subtext">Job Search &amp; Application Workspace</span>
       </div>
     </div>
     <div class="candidate-badge" id="candidateBadge">
-      <span class="avatar">👨‍💻</span>
+      <div class="candidate-avatar-circle" aria-hidden="true">AN</div>
       <div class="candidate-info">
         <strong id="candName">Abhishek N</strong>
-        <small id="candDegree">MCA 2026 • Java Full Stack • Bengaluru</small>
+        <small id="candDegree">MCA 2026 &middot; Java Full Stack &middot; Bengaluru</small>
       </div>
     </div>
-    <nav class="nav-tabs-bar" id="primaryNavTabs">
-      <button class="nav-tab active" id="navJobsBtn" data-view="jobs" title="Browse and search job opportunities">🎯 Jobs</button>
-      <button class="nav-tab" id="viewApplicationsBtn" data-view="applications" title="Visual application pipeline & stages">🚀 Applications <span class="nav-badge" id="navAppsBadge">3</span></button>
-      <button class="nav-tab" id="navResumeStudioBtn" data-view="resume-studio" title="AI Resume Studio & ATS Analyzer">📄 Resume Studio</button>
-      <button class="nav-tab" id="commsHubBtn" data-view="comms" title="Recruiter emails, interviews & calendar">📬 Recruiter Hub <span class="nav-badge" id="navCommsBadge">2</span></button>
-      <button class="nav-tab" id="careerIntelBtn" data-view="intelligence" title="Skill gaps, roadmap, STAR stories & salary">📈 Intelligence</button>
-      <button class="nav-tab" id="viewProfileBtn" data-view="profile" title="Verified candidate profile">👤 Profile</button>
-      <button class="nav-tab" id="automationBackupBtn" data-view="settings" title="System automation, backups & tools">⚙️ Tools</button>
+    <nav class="nav-tabs-bar" id="primaryNavTabs" aria-label="Primary Navigation">
+      <button class="nav-tab active" id="navJobsBtn" data-view="jobs" title="Browse and search job opportunities">
+        <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <span>Jobs</span>
+      </button>
+      <button class="nav-tab" id="viewApplicationsBtn" data-view="applications" title="Application pipeline and status tracker">
+        <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+        <span>Applications</span>
+        <span class="nav-badge" id="navAppsBadge">3</span>
+      </button>
+      <button class="nav-tab" id="navResumeStudioBtn" data-view="resume-studio" title="ATS Resume Studio and version vault">
+        <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        <span>Resume Studio</span>
+      </button>
+      <button class="nav-tab" id="navContactsBtn" data-view="contacts" title="Recruiter Hub, Contact Discovery &amp; Outreach">
+        <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <span>Recruiter Hub</span>
+      </button>
+      <button class="nav-tab" id="commsHubBtn" data-view="comms" title="Communications, Gmail Inbox &amp; Follow-Ups">
+        <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+        <span>Communications</span>
+        <span class="nav-badge" id="navCommsBadge">2</span>
+      </button>
+      <button class="nav-tab" id="careerIntelBtn" data-view="intelligence" title="Career Intelligence, Skill Gaps &amp; Salary">
+        <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        <span>Career Intelligence</span>
+      </button>
+      <details class="nav-dropdown" id="secondaryNavDropdown">
+        <summary class="nav-tab nav-more-trigger" title="Profile, settings and system tools">
+          <span>More</span>
+          <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        </summary>
+        <div class="nav-dropdown-content">
+          <button class="nav-tab" id="viewProfileBtn" data-view="profile" title="Verified candidate profile">
+            <span>Candidate Profile</span>
+          </button>
+          <button class="nav-tab" id="automationBackupBtn" data-view="settings" title="System automation, diagnostics, backups &amp; tools">
+            <span>Tools &amp; Diagnostics</span>
+          </button>
+        </div>
+      </details>
     </nav>
     <div class="nav-actions">
-      <button class="btn btn-outline btn-sm theme-toggle-btn" id="themeToggleBtn" onclick="toggleTheme()" title="Switch Light/Dark Mode" style="margin-right: 6px; font-weight: 600;">☀️ Light</button>
-      <button class="btn btn-primary" id="scanBtn" title="Scan online repositories for fresher jobs">⚡ Scan Jobs</button>
+      <button class="btn btn-outline btn-sm theme-toggle-btn" id="themeToggleBtn" onclick="toggleTheme()" title="Switch Light/Dark Mode" aria-label="Toggle theme">Light</button>
+      <button class="btn btn-primary btn-sm" id="scanBtn" title="Scan online repositories for fresher jobs">Scan Jobs</button>
     </div>
   </header>
 
@@ -42,100 +77,275 @@
     <!-- VIEW 1: JOB DISCOVERY & RECOMMENDATIONS   -->
     <!-- ========================================== -->
     <section id="viewJobs" class="workspace-view active">
-      <!-- Stat Counters -->
-      <section class="stats-grid">
-        <div class="stat-card">
-          <div class="stat-value" id="statTotal">0</div>
-          <div class="stat-label">Total Scanned</div>
-        </div>
-        <div class="stat-card highlight">
-          <div class="stat-value text-success" id="statRecommended">0</div>
-          <div class="stat-label">Recommended Roles</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value text-warning" id="statConsider">0</div>
-          <div class="stat-label">Consider / Review</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value text-info" id="statSaved">0</div>
-          <div class="stat-label">Saved Pipeline</div>
+      <!-- Sleek Discovery Overview Strip -->
+      <section class="discovery-kpi-strip">
+        <div class="kpi-pill"><span class="kpi-bullet">●</span> <strong id="statTotal">0</strong> <span class="kpi-tag">Relevant Jobs</span></div>
+        <div class="kpi-pill highlight-success"><span class="kpi-bullet text-success">●</span> <strong id="statRecommended" class="text-success">0</strong> <span class="kpi-tag">Strong Matches</span></div>
+        <div class="kpi-pill"><span class="kpi-bullet text-warning">●</span> <strong id="statConsider" class="text-warning">0</strong> <span class="kpi-tag">Review</span></div>
+        <div class="kpi-pill"><span class="kpi-bullet text-info">●</span> <strong id="statSaved" class="text-info">0</strong> <span class="kpi-tag">Saved</span></div>
+        <div class="kpi-pill-right">
+          <button type="button" class="btn btn-primary btn-sm" id="btnStartBatchSession" onclick="openBatchSessionModal()" title="Launch sequential batch application preparation queue">Start Application Session</button>
         </div>
       </section>
 
-      <!-- Filters and Search Toolbar -->
+      <!-- Unified Search Console -->
+      <section class="unified-search-console">
+        <div class="search-main-row">
+          <div class="search-input-wrapper">
+            <span class="search-icon" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+            </span>
+            <input type="text" id="unifiedSearchInput" class="unified-search-input" placeholder="Search by role, skills, location (e.g. 'MCA Fresher Java Developer Bengaluru', 'Junior Spring Boot')..." />
+          </div>
+          <div class="search-actions-group">
+            <button id="btnExecuteSearch" class="btn btn-primary search-submit-btn">Search</button>
+            <button id="btnSaveCurrentSearch" class="btn btn-outline btn-sm" onclick="saveCurrentSearchQuery()" title="Save this search query">Save Search</button>
+            <button id="btnResetSearch" class="btn btn-outline search-reset-btn" title="Reset all search criteria and filters">Reset</button>
+          </div>
+        </div>
+
+        <!-- Fast Natural Language Suggestions -->
+        <div class="search-suggestion-chips" id="searchSuggestionChips">
+          <span class="suggestion-lead">Suggested:</span>
+          <button type="button" class="search-chip-btn" data-query="MCA Fresher Java Developer Bengaluru">MCA Fresher Java (Bengaluru)</button>
+          <button type="button" class="search-chip-btn" data-query="Junior Spring Boot Developer Bangalore">Junior Spring Boot (Bangalore)</button>
+          <button type="button" class="search-chip-btn" data-query="Associate Software Engineer 0-1 years">Associate Software Engineer (0-1 yrs)</button>
+          <button type="button" class="search-chip-btn" data-query="Remote Java Developer">Remote Java Developer</button>
+        </div>
+
+        <!-- Compact Primary Filter Row -->
+        <div class="compact-filter-row">
+          <div class="compact-filter-item">
+            <label for="locationFilterSelect">Location</label>
+            <select id="locationFilterSelect" class="filter-select">
+              <option value="bengaluru" selected>Bengaluru</option>
+              <option value="remote">Remote (India)</option>
+              <option value="hyderabad">Hyderabad</option>
+              <option value="pune">Pune</option>
+              <option value="chennai">Chennai</option>
+              <option value="mumbai">Mumbai</option>
+              <option value="delhi">Delhi NCR</option>
+              <option value="all">All Locations</option>
+            </select>
+          </div>
+
+          <div class="compact-filter-item">
+            <label for="experienceSelect">Experience</label>
+            <select id="experienceSelect" class="filter-select">
+              <option value="any">Any Experience</option>
+              <option value="fresher" selected>Fresher (0 yrs)</option>
+              <option value="0-1">0–1 Years</option>
+              <option value="0-2">0–2 Years</option>
+              <option value="1-3">1–3 Years</option>
+            </select>
+          </div>
+
+          <div class="compact-filter-item">
+            <label for="sourceFilterSelect">Source</label>
+            <select id="sourceFilterSelect" class="filter-select">
+              <option value="all">All Sources</option>
+              <optgroup label="Direct ATS (Live API)">
+                <option value="greenhouse">Greenhouse</option>
+                <option value="lever">Lever</option>
+                <option value="ashby">Ashby</option>
+                <option value="smartrecruiters">SmartRecruiters</option>
+                <option value="workable">Workable</option>
+              </optgroup>
+              <optgroup label="Career Pages &amp; Aggregators">
+                <option value="career_pages">Career Pages</option>
+                <option value="freehire">FreeHire</option>
+                <option value="other">Other</option>
+              </optgroup>
+              <optgroup label="External Search Portals">
+                <option value="naukri">Naukri (External)</option>
+                <option value="indeed">Indeed (External)</option>
+                <option value="linkedin">LinkedIn (External)</option>
+                <option value="apna">Apna (External)</option>
+                <option value="workindia">WorkIndia (External)</option>
+              </optgroup>
+            </select>
+          </div>
+
+          <div class="compact-filter-item">
+            <label for="priorityFilterSelect">Priority</label>
+            <select id="priorityFilterSelect" class="filter-select">
+              <option value="all">All Priorities</option>
+              <option value="p1">Apply First (P1)</option>
+              <option value="p2">Strong Match (P2)</option>
+              <option value="p3">Review (P3)</option>
+              <option value="p4">Low Priority (P4)</option>
+              <option value="disqualified">Disqualified</option>
+            </select>
+          </div>
+
+          <div class="compact-filter-item">
+            <label for="sortBySelect">Sort</label>
+            <select id="sortBySelect" class="filter-select">
+              <option value="relevance">Best Relevance</option>
+              <option value="match_score">Highest Match</option>
+              <option value="newest">Newest</option>
+            </select>
+          </div>
+
+          <button type="button" id="btnToggleAdvancedFilters" class="btn btn-outline btn-sm advanced-toggle-btn" onclick="toggleAdvancedFilters()">
+            More Filters ▾
+          </button>
+        </div>
+
+        <!-- Expandable Advanced Filters Panel (Collapsed by Default) -->
+        <div id="advancedFiltersPanel" class="advanced-filters-panel hidden">
+          <div class="advanced-filters-grid">
+            <div class="filter-select-wrapper">
+              <label for="datePostedSelect">Date Posted</label>
+              <select id="datePostedSelect" class="filter-select">
+                <option value="all">All Time</option>
+                <option value="24h">Last 24 Hours</option>
+                <option value="3d">Last 3 Days</option>
+                <option value="7d">Last 7 Days</option>
+                <option value="15d">Last 15 Days</option>
+                <option value="30d">Last 30 Days</option>
+              </select>
+            </div>
+
+            <div class="filter-select-wrapper">
+              <label for="workModeSelect">Work Mode</label>
+              <select id="workModeSelect" class="filter-select">
+                <option value="all">All Modes</option>
+                <option value="remote">Remote</option>
+                <option value="hybrid">Hybrid</option>
+                <option value="onsite">On-site</option>
+              </select>
+            </div>
+
+            <div class="filter-select-wrapper">
+              <label for="employmentTypeSelect">Employment Type</label>
+              <select id="employmentTypeSelect" class="filter-select">
+                <option value="all">All Types</option>
+                <option value="full_time">Full-time</option>
+                <option value="internship">Internship</option>
+                <option value="contract">Contract</option>
+              </select>
+            </div>
+
+            <div class="filter-select-wrapper">
+              <label for="degreeSelect">Degree Eligibility</label>
+              <select id="degreeSelect" class="filter-select">
+                <option value="all">All Degrees</option>
+                <option value="mca">MCA Accepted</option>
+                <option value="btech">B.Tech Non-Exclusive</option>
+                <option value="eligible_only">Confirmed Eligible</option>
+              </select>
+            </div>
+
+            <div class="filter-select-wrapper">
+              <label for="salaryFilterSelect">Salary</label>
+              <select id="salaryFilterSelect" class="filter-select">
+                <option value="any">Any Salary</option>
+                <option value="with_salary">With Salary Only</option>
+              </select>
+            </div>
+
+            <div class="filter-select-wrapper">
+              <label for="scoreFilterSelect">Match Category</label>
+              <select id="scoreFilterSelect" class="filter-select">
+                <option value="0">Any Match</option>
+                <option value="90">Strong Fit (90+)</option>
+                <option value="80">High Match (80+)</option>
+                <option value="65">Recommended (65+)</option>
+                <option value="45">Consider (45+)</option>
+              </select>
+            </div>
+
+            <div class="filter-select-wrapper">
+              <label for="excludedKeywordsInput">Exclude Keywords</label>
+              <input type="text" id="excludedKeywordsInput" class="refinement-text-input" placeholder="e.g. Senior, Lead, 5+ yrs" />
+            </div>
+
+            <div class="filter-select-wrapper">
+              <label for="customSkillsInput">Add Skill Filter</label>
+              <input type="text" id="customSkillsInput" class="refinement-text-input" placeholder="e.g. Java, Spring Boot (Enter)" />
+            </div>
+          </div>
+
+          <div class="advanced-toggles-row">
+            <label class="filter-checkbox-label">
+              <input type="checkbox" id="fresherOnlyToggle" checked />
+              <span>MCA Fresher / Junior Priority (0–2 yrs)</span>
+            </label>
+            <label class="filter-checkbox-label">
+              <input type="checkbox" id="chkExcludeExpired" checked />
+              <span>Exclude Expired</span>
+            </label>
+            <label class="filter-checkbox-label">
+              <input type="checkbox" id="chkExcludeApplied" />
+              <span>Exclude Applied</span>
+            </label>
+            <label class="filter-checkbox-label">
+              <input type="checkbox" id="chkExcludeSaved" />
+              <span>Exclude Saved</span>
+            </label>
+          </div>
+
+          <!-- Saved Searches & History Bar -->
+          <div class="saved-searches-row" id="savedSearchesRow">
+            <span class="suggestion-lead">Saved Searches:</span>
+            <div id="savedSearchesList" class="saved-searches-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Location Region Tabs (India / Remote India / Worldwide Remote / International) -->
+      <section class="location-regions-bar" id="locationRegionTabs">
+        <button type="button" class="region-tab-btn active" data-region="all">All Regions</button>
+        <button type="button" class="region-tab-btn" data-region="india">India</button>
+        <button type="button" class="region-tab-btn" data-region="remote_india">Remote India</button>
+        <button type="button" class="region-tab-btn" data-region="worldwide_remote">Worldwide Remote</button>
+        <button type="button" class="region-tab-btn" data-region="international">International Onsite/Hybrid</button>
+      </section>
+
+      <!-- Practical Status Filter Tabs -->
       <section class="toolbar">
         <div class="filter-group">
           <button class="filter-tab active" data-filter="all">All Jobs</button>
-          <button class="filter-tab" data-filter="RECOMMENDED">🌟 Recommended</button>
-          <button class="filter-tab" data-filter="CONSIDER">🔍 Consider</button>
-          <button class="filter-tab" data-filter="saved">💾 Saved</button>
-          <button class="filter-tab" data-filter="ready_to_apply">📝 Ready to Apply</button>
-          <button class="filter-tab" data-filter="applied">🚀 Applied</button>
+          <button class="filter-tab" data-filter="RECOMMENDED">Strong Match</button>
+          <button class="filter-tab" data-filter="CONSIDER">Review</button>
+          <button class="filter-tab" data-filter="saved">Saved</button>
+          <button class="filter-tab" data-filter="ready_to_apply">Ready to Apply</button>
+          <button class="filter-tab" data-filter="applied">Applied</button>
         </div>
-        <div class="search-box">
-          <input type="text" id="searchInput" placeholder="Search title, company, or skill..." />
+        <div class="toolbar-right-info">
+          <span class="count-tag" id="visibleCount">0 roles</span>
         </div>
       </section>
 
-      <!-- Advanced Discovery Filters -->
-      <section class="discovery-filters-bar">
-        <div class="filter-select-wrapper">
-          <label for="sourceSelect">Source:</label>
-          <select id="sourceSelect" class="filter-select">
-            <option value="all">All Sources</option>
-            <option value="lever">Lever</option>
-            <option value="ashby">Ashby</option>
-            <option value="smartrecruiters">SmartRecruiters</option>
-            <option value="greenhouse">Greenhouse</option>
-            <option value="freehire">FreeHire</option>
-          </select>
+      <!-- External Assisted Search Gateway Banner (Shown for External-Only Sources) -->
+      <section id="externalSourceGatewayCard" class="external-gateway-card hidden">
+        <div class="gateway-header">
+          <div class="gateway-title-row">
+            <span class="gateway-badge">External / User-Assisted Search Gateway</span>
+            <h3 id="gatewaySourceTitle">Naukri Assisted Discovery</h3>
+          </div>
+          <span class="gateway-status-pill">Anti-Bot &amp; Login Safe</span>
         </div>
-
-        <div class="filter-select-wrapper">
-          <label for="locationSelect">Location:</label>
-          <select id="locationSelect" class="filter-select">
-            <option value="all">All Locations</option>
-            <option value="bengaluru">📍 Bengaluru / Karnataka</option>
-            <option value="remote">🌐 Remote (India/Global)</option>
-            <option value="hyderabad">Hyderabad</option>
-            <option value="pune">Pune</option>
-            <option value="chennai">Chennai</option>
-            <option value="mumbai">Mumbai</option>
-            <option value="delhi">Delhi NCR</option>
-          </select>
-        </div>
-
-        <div class="filter-select-wrapper">
-          <label for="workModeSelect">Work Mode:</label>
-          <select id="workModeSelect" class="filter-select">
-            <option value="all">All Modes</option>
-            <option value="remote">Remote</option>
-            <option value="hybrid">Hybrid</option>
-            <option value="onsite">On-site</option>
-          </select>
-        </div>
-
-        <div class="filter-select-wrapper">
-          <label for="verificationSelect">Freshness:</label>
-          <select id="verificationSelect" class="filter-select">
-            <option value="all">All Statuses</option>
-            <option value="verified_active">Verified Active</option>
-            <option value="blocked">Protected / Manual</option>
-            <option value="unverified">Unverified</option>
-            <option value="expired">Expired / Closed</option>
-          </select>
+        <p class="gateway-description" id="gatewaySourceDescription">
+          This platform enforces strict anti-bot protections and authenticated user boundaries. CareerOS generates pre-filled external search links matching your filters.
+        </p>
+        <div class="gateway-actions-row">
+          <a id="btnLaunchExternalSearch" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-primary gateway-launch-btn">
+            Open Pre-Filled Search in New Tab
+          </a>
+          <div class="gateway-import-wrapper">
+            <input type="text" id="importJobUrlInput" placeholder="Paste job URL from this portal to inspect &amp; track..." class="gateway-import-input" />
+            <button id="btnImportJobUrl" class="btn btn-outline gateway-import-btn">Import URL</button>
+          </div>
         </div>
       </section>
 
       <!-- Job Feed -->
       <section class="job-list-section">
-        <div class="section-header">
-          <h2 id="jobSectionTitle">Job Opportunities</h2>
-          <span class="count-tag" id="visibleCount">0 roles</span>
-        </div>
         <div id="loadingIndicator" class="loading hidden">
           <div class="spinner"></div>
-          <p>Scanning job repositories across India...</p>
+          <p>Searching job repositories...</p>
         </div>
         <div class="job-grid" id="jobGrid">
           <!-- Cards injected via app.js -->
@@ -155,8 +365,8 @@
         </div>
         <div class="workspace-header-actions">
           <div class="segmented-control" id="pipelineViewToggle">
-            <button class="segmented-btn active" id="btnViewKanban" data-mode="kanban">📋 Kanban Board</button>
-            <button class="segmented-btn" id="btnViewTable" data-mode="table">📄 Detailed List</button>
+            <button class="segmented-btn" id="btnViewKanban" data-mode="kanban">📋 Kanban Board</button>
+            <button class="segmented-btn active" id="btnViewTable" data-mode="table">📄 Detailed List (Default)</button>
           </div>
           <button class="btn btn-outline btn-sm" id="refreshApplicationsBtn">🔄 Refresh Pipeline</button>
         </div>
@@ -190,8 +400,15 @@
         </div>
       </div>
 
-      <!-- Kanban Board Container -->
-      <div id="applicationsKanbanContainer" class="kanban-wrapper">
+      <!-- Detailed Table View Container (Default View) -->
+      <div id="applicationsTableContainer" class="applications-table-wrapper">
+        <div id="applicationsTableBody">
+          <!-- Injected dynamically via app.js -->
+        </div>
+      </div>
+
+      <!-- Kanban Board Container (Toggleable) -->
+      <div id="applicationsKanbanContainer" class="kanban-wrapper hidden">
         <div class="kanban-board" id="kanbanBoard">
           <!-- Column 1: Saved / Target -->
           <div class="kanban-column" data-stage="saved">
@@ -246,13 +463,6 @@
             </div>
             <div class="kanban-cards" id="cardsColOffer"></div>
           </div>
-        </div>
-      </div>
-
-      <!-- Detailed Table View Container (Toggleable) -->
-      <div id="applicationsTableContainer" class="applications-table-wrapper hidden">
-        <div id="applicationsTableBody">
-          <!-- Injected dynamically via app.js -->
         </div>
       </div>
     </section>
@@ -469,18 +679,34 @@
     </section>
 
     <!-- ========================================== -->
-    <!-- VIEW 4: RECRUITER COMMS & INTERVIEWS      -->
+    <!-- VIEW 4A: CONTACTS & RECRUITER RESEARCH     -->
+    <!-- ========================================== -->
+    <section id="viewContacts" class="workspace-view hidden">
+      <div class="workspace-header">
+        <div>
+          <div class="workspace-eyebrow">Contacts &amp; Outreach</div>
+          <h2 class="workspace-title">Company &amp; Recruiter Contacts</h2>
+          <p class="workspace-subtext">Verified hiring contacts, outreach status, and follow-up dates linked to your applications. Unverified contact details are never guessed.</p>
+        </div>
+      </div>
+      <div id="contactsViewBody" class="workspace-content-pane">
+        <!-- Injected dynamically via app.js -->
+      </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- VIEW 4B: INBOX, EMAILS & INTERVIEWS        -->
     <!-- ========================================== -->
     <section id="viewComms" class="workspace-view hidden">
       <div class="workspace-header">
         <div>
-          <div class="workspace-eyebrow">📬 Recruiter Communication Hub</div>
-          <h2 class="workspace-title">Recruiter Emails, Interviews & Follow-Up Intelligence</h2>
-          <p class="workspace-subtext">Synchronize recruiter outreach, coding assessment deadlines, and scheduled Google Meet interviews.</p>
+          <div class="workspace-eyebrow">Inbox &amp; Calendar</div>
+          <h2 class="workspace-title">Recruiter Inbox, Interviews &amp; Follow-Ups</h2>
+          <p class="workspace-subtext">Synchronize recruiter outreach via Gmail OAuth, track coding assessment deadlines, and manage interview schedules.</p>
         </div>
         <div class="workspace-header-actions">
-          <button class="btn btn-primary btn-sm" id="syncEmailsViewBtn">🔄 Sync Inbox</button>
-          <button class="btn btn-outline btn-sm" id="oauthSettingsViewBtn">⚙️ Google OAuth</button>
+          <button class="btn btn-primary btn-sm" id="syncEmailsViewBtn">Sync Inbox</button>
+          <button class="btn btn-outline btn-sm" id="oauthSettingsViewBtn">Google OAuth</button>
         </div>
       </div>
       <div id="commsViewBody" class="workspace-content-pane">
@@ -574,6 +800,7 @@
       <button class="drawer-tab active" data-dtab="overview">Overview & Match</button>
       <button class="drawer-tab" data-dtab="dossier">Application Dossier</button>
       <button class="drawer-tab" data-dtab="screening">Screening Q&A</button>
+      <button class="drawer-tab" data-dtab="interview-prep">🎯 Interview Prep</button>
       <button class="drawer-tab" data-dtab="timeline">Timeline & Notes</button>
       <button class="drawer-tab" data-dtab="jd">Original JD</button>
     </div>
@@ -594,6 +821,38 @@
       </div>
       <div class="modal-body" id="modalBody">
         <!-- Injected dynamically -->
+      </div>
+    </div>
+  </div>
+
+  <!-- ATS Resume Ready & Manual Application Modal (Phase 15 Core Deliverable) -->
+  <div class="modal hidden" id="atsResumeReadyModal">
+    <div class="modal-content ats-ready-modal-content">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <span class="modal-badge-pill">ATS Resume Verified &amp; Ready</span>
+          <h2 id="atsReadyRoleTitle">Java Developer @ Company</h2>
+        </div>
+        <button class="close-btn" id="closeAtsReadyModalBtn" title="Close Modal">&times;</button>
+      </div>
+      <div class="modal-body" id="atsReadyModalBody">
+        <!-- Injected dynamically via app.js -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Batch Application Preparation Assistant Modal -->
+  <div class="modal hidden" id="batchSessionModal">
+    <div class="modal-content batch-session-modal-content">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <span class="modal-badge-pill">Sequential Application Assistant</span>
+          <h2 id="batchSessionTitle">Batch Application Preparation Session</h2>
+        </div>
+        <button class="close-btn" id="closeBatchSessionModalBtn" onclick="closeBatchSessionModal()" title="Close Modal">&times;</button>
+      </div>
+      <div class="modal-body" id="batchSessionModalBody">
+        <!-- Injected dynamically via app.js -->
       </div>
     </div>
   </div>

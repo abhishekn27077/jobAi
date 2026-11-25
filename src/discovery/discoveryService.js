@@ -1,5 +1,6 @@
 import { searchFreehireJobs } from './freehireClient.js';
-import { fetchSmartRecruitersJobs, fetchGreenhouseJobs, fetchLeverJobs, fetchAshbyJobs } from './directAtsClient.js';
+import { fetchSmartRecruitersJobs, fetchGreenhouseJobs, fetchLeverJobs, fetchAshbyJobs, fetchWorkableJobs, fetchRecruiteeJobs } from './directAtsClient.js';
+import { recordSourceScanTelemetry } from './sourceRegistry.js';
 import { saveOrUpdateJob, recordScanHistory } from '../tracker/jobTracker.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -26,7 +27,9 @@ export async function runJobDiscovery({ customQuery = null, maxPerQuery = 20, co
     smartrecruiters: { scanned: 0, new: 0, updated: 0, errors: 0 },
     greenhouse: { scanned: 0, new: 0, updated: 0, errors: 0 },
     lever: { scanned: 0, new: 0, updated: 0, errors: 0 },
-    ashby: { scanned: 0, new: 0, updated: 0, errors: 0 }
+    ashby: { scanned: 0, new: 0, updated: 0, errors: 0 },
+    workable: { scanned: 0, new: 0, updated: 0, errors: 0 },
+    recruitee: { scanned: 0, new: 0, updated: 0, errors: 0 }
   };
 
   // 1. FreeHire Live Ingestion
@@ -77,6 +80,11 @@ export async function runJobDiscovery({ customQuery = null, maxPerQuery = 20, co
         durationMs: Date.now() - startTime,
         status: 'success'
       });
+      recordSourceScanTelemetry('freehire', {
+        success: true,
+        jobsFound: result.jobs.length,
+        newJobsAdded: qNew
+      });
     } catch (err) {
       sourceStats.freehire.errors++;
       console.error(`  -> Failed search for "${q}":`, err.message);
@@ -90,6 +98,10 @@ export async function runJobDiscovery({ customQuery = null, maxPerQuery = 20, co
         durationMs: Date.now() - startTime,
         status: 'error',
         errorMessage: err.message
+      });
+      recordSourceScanTelemetry('freehire', {
+        success: false,
+        error: err.message
       });
     }
   }
@@ -115,6 +127,10 @@ export async function runJobDiscovery({ customQuery = null, maxPerQuery = 20, co
             directJobs = await fetchLeverJobs(c.companyToken, { query: customQuery });
           } else if (portal === 'ashby' && c.companyToken) {
             directJobs = await fetchAshbyJobs(c.companyToken, { query: customQuery });
+          } else if (portal === 'workable' && c.companyToken) {
+            directJobs = await fetchWorkableJobs(c.companyToken, { query: customQuery });
+          } else if (portal === 'recruitee' && c.companyToken) {
+            directJobs = await fetchRecruiteeJobs(c.companyToken, { query: customQuery });
           }
 
           if (!sourceStats[portal]) {
@@ -157,6 +173,12 @@ export async function runJobDiscovery({ customQuery = null, maxPerQuery = 20, co
             status: 'success'
           });
 
+          recordSourceScanTelemetry(portal, {
+            success: true,
+            jobsFound: directJobs.length,
+            newJobsAdded: cNew
+          });
+
           console.log(`  -> [${portal.toUpperCase()}] ${c.name}: ${directJobs.length} jobs retrieved (${cNew} new)`);
         } catch (atsErr) {
           if (sourceStats[portal]) sourceStats[portal].errors++;
@@ -171,6 +193,11 @@ export async function runJobDiscovery({ customQuery = null, maxPerQuery = 20, co
             durationMs: Date.now() - startTime,
             status: 'error',
             errorMessage: atsErr.message
+          });
+
+          recordSourceScanTelemetry(portal, {
+            success: false,
+            error: atsErr.message
           });
         }
       }

@@ -6,17 +6,25 @@
 
 import { getDatabase } from '../db/schema.js';
 import { getPortalSupportMatrix } from '../automation/portalAdapters/portalRegistry.js';
+import { normalizeCanonicalUrl, extractAtsJobId } from '../discovery/urlNormalizer.js';
 
 export const VALID_APPLICATION_STATUSES = [
+  'discovered',
+  'saved',
   'interested',
   'preparing',
   'ready_for_review',
+  'submission_verification_pending',
+  'user_submitted',
   'submitted',
+  'applied',
   'assessment',
   'interview',
-  'rejected',
   'offer',
-  'withdrawn'
+  'rejected',
+  'withdrawn',
+  'closed',
+  'expired'
 ];
 
 export function getApplications({ status = null, limit = 50, offset = 0 } = {}) {
@@ -85,9 +93,9 @@ export function updateApplicationStatus(jobId, newStatus, { notes = '', confirma
     throw new Error(`Invalid application status "${newStatus}". Must be one of: ${VALID_APPLICATION_STATUSES.join(', ')}`);
   }
 
-  // Strict Rule: Never mark application as submitted without confirmed user action
-  if (newStatus === 'submitted' && !userConfirmed) {
-    throw new Error('Approval Gate Violation: An application cannot be marked as "submitted" without explicit user confirmation of submission.');
+  // Strict Rule: Never mark application as submitted/applied without confirmed user action
+  if (['submitted', 'applied', 'user_submitted'].includes(newStatus) && !userConfirmed) {
+    throw new Error(`Approval Gate Violation: An application cannot be marked as "${newStatus}" without explicit user confirmation of submission.`);
   }
 
   const db = getDatabase();
@@ -154,12 +162,17 @@ export function updateApplicationStatus(jobId, newStatus, { notes = '', confirma
     'interested': 'saved',
     'preparing': 'saved',
     'ready_for_review': 'ready_to_apply',
+    'submission_verification_pending': 'ready_to_apply',
+    'user_submitted': 'applied',
     'submitted': 'applied',
+    'applied': 'applied',
     'assessment': 'applied',
     'interview': 'interviewing',
     'rejected': 'rejected',
     'offer': 'offer',
-    'withdrawn': 'dismissed'
+    'withdrawn': 'dismissed',
+    'closed': 'expired',
+    'expired': 'expired'
   };
 
   const syncJobStatus = jobStatusMap[newStatus];
@@ -182,6 +195,96 @@ export function updateApplicationStatus(jobId, newStatus, { notes = '', confirma
     previousStatus: existing.status,
     newStatus,
     updatedAt: now
+  };
+}
+
+const APPLIED_STATUSES = new Set(['submitted', 'applied', 'user_submitted', 'assessment', 'interview', 'offer']);
+const IN_PROGRESS_STATUSES = new Set(['preparing', 'ready_for_review', 'interested']);
+
+/**
+ * Checks whether a job (by ID or job object) is already applied or has an active
+ * application in progress, using job_id, canonical_url, ATS job ID, and company+title.
+ */
+export function checkDuplicateApplication(jobOrId) {
+  const db = getDatabase();
+  const job = typeof jobOrId === 'object' && jobOrId !== null
+    ? jobOrId
+    : db.prepare('SELECT * FROM jobs WHERE id = ?').get(jobOrId);
+
+  if (!job) {
+    return { isDuplicate: false, state: 'NONE', existingApplication: null, reason: null };
+  }
+
+  const allApps = db.prepare(`
+    SELECT a.*, j.title as job_title, j.company as job_company, j.url as job_record_url, j.canonical_url
+    FROM applications a
+    JOIN jobs j ON a.job_id = j.id
+  `).all();
+
+  const targetCanonical = normalizeCanonicalUrl(job.canonical_url || job.url || '');
+  const targetAtsId = extractAtsJobId(job.url || '');
+  const normCompany = (job.company || '').toLowerCase().trim();
+  const normTitle = (job.title || '').toLowerCase().trim();
+
+  let matchedApp = null;
+  let matchReason = null;
+
+  for (const app of allApps) {
+    if (app.job_id === job.id) {
+      matchedApp = app;
+      matchReason = 'Exact job record in applications';
+      break;
+    }
+    const appCanonical = normalizeCanonicalUrl(app.canonical_url || app.job_url || app.job_record_url || '');
+    if (targetCanonical && appCanonical && targetCanonical === appCanonical) {
+      matchedApp = app;
+      matchReason = 'Matching canonical job URL';
+      break;
+    }
+    const appAtsId = extractAtsJobId(app.job_url || app.job_record_url || '');
+    if (targetAtsId && appAtsId && targetAtsId === appAtsId) {
+      matchedApp = app;
+      matchReason = `Matching ATS requisition ID (${targetAtsId})`;
+      break;
+    }
+    if (
+      normCompany && normTitle &&
+      (app.job_company || '').toLowerCase().trim() === normCompany &&
+      (app.job_title || '').toLowerCase().trim() === normTitle
+    ) {
+      matchedApp = app;
+      matchReason = 'Matching company and job title';
+      break;
+    }
+  }
+
+  if (!matchedApp) {
+    return { isDuplicate: false, state: 'NONE', existingApplication: null, reason: null };
+  }
+
+  const st = (matchedApp.status || '').toLowerCase();
+  if (APPLIED_STATUSES.has(st)) {
+    return {
+      isDuplicate: true,
+      state: 'ALREADY_APPLIED',
+      existingApplication: matchedApp,
+      reason: `${matchReason} (Status: ${matchedApp.status})`
+    };
+  }
+  if (IN_PROGRESS_STATUSES.has(st)) {
+    return {
+      isDuplicate: true,
+      state: 'APPLICATION_IN_PROGRESS',
+      existingApplication: matchedApp,
+      reason: `${matchReason} (Status: ${matchedApp.status})`
+    };
+  }
+
+  return {
+    isDuplicate: false,
+    state: 'PREVIOUS_CLOSED',
+    existingApplication: matchedApp,
+    reason: `${matchReason} (Status: ${matchedApp.status})`
   };
 }
 

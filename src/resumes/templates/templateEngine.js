@@ -91,88 +91,137 @@ export function renderResumeMarkdown(data) {
 }
 
 // -------------------------------------------------------------
-// TEMPLATE 1: ATS Professional (Pure B&W, Standard Single Column)
+// TEMPLATE 1: ATS Professional (Executive Single-Column, Crisp Typography)
 // -------------------------------------------------------------
 function renderAtsProfessionalHtml(p, s, skills, exp, projects, edu, certs) {
+  const cleanUrlLabel = (url) => (url || '').replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '');
+  const contactParts = [p.location, p.phone, p.email].filter(Boolean).map(v => escapeXml(v));
+  const linkParts = [
+    p.linkedIn ? `<a href="${escapeXml(p.linkedIn)}">${escapeXml(cleanUrlLabel(p.linkedIn))}</a>` : '',
+    p.gitHub ? `<a href="${escapeXml(p.gitHub)}">${escapeXml(cleanUrlLabel(p.gitHub))}</a>` : '',
+    p.portfolio ? `<a href="${escapeXml(p.portfolio)}">${escapeXml(cleanUrlLabel(p.portfolio))}</a>` : ''
+  ].filter(Boolean);
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>${escapeXml(p.fullName)} - Resume</title>
+<title>${escapeXml(p.fullName || 'Abhishek N')} - Resume</title>
 <style>
   @page {
     size: A4;
-    margin: 0;
+  }
+  * {
+    box-sizing: border-box;
   }
   body {
-    font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
-    color: #111111;
+    font-family: "Calibri", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    color: #111827;
     background: #ffffff;
-    line-height: 1.32;
-    font-size: 9.5pt;
+    line-height: 1.42;
+    font-size: 10pt;
     margin: 0;
     padding: 0;
-  }
-  h2, .entry-title, ul {
-    break-inside: avoid;
-    page-break-inside: avoid;
   }
   .header {
     text-align: center;
-    border-bottom: 2px solid #000000;
-    padding-bottom: 8px;
+    border-bottom: 1.5px solid #111827;
+    padding-bottom: 9px;
     margin-bottom: 12px;
   }
   h1 {
-    font-size: 18pt;
-    font-weight: bold;
+    font-size: 19pt;
+    font-weight: 700;
+    color: #0f172a;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin: 0 0 4px 0;
+    letter-spacing: 0.8px;
+    margin: 0 0 5px 0;
   }
   .contact-line {
-    font-size: 9pt;
-    color: #222222;
+    font-size: 9.2pt;
+    color: #374151;
+    line-height: 1.45;
   }
   .contact-line a {
-    color: #000000;
-    text-decoration: underline;
+    color: #111827;
+    text-decoration: none;
+    border-bottom: 1px dotted #9ca3af;
+  }
+  section {
+    margin-bottom: 10px;
   }
   h2 {
-    font-size: 11pt;
-    font-weight: bold;
+    font-size: 10.5pt;
+    font-weight: 700;
+    color: #0f172a;
     text-transform: uppercase;
-    border-bottom: 1px solid #000000;
-    margin: 10px 0 4px 0;
+    letter-spacing: 0.7px;
+    border-bottom: 1px solid #9ca3af;
+    margin: 12px 0 6px 0;
     padding-bottom: 2px;
-    letter-spacing: 0.5px;
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+  .summary-text {
+    margin: 0 0 6px 0;
+    font-size: 9.8pt;
+    color: #1f2937;
+    text-align: left;
+  }
+  .skills-list {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .skills-row {
+    font-size: 9.6pt;
+    line-height: 1.38;
+  }
+  .skills-row strong {
+    color: #0f172a;
+    font-weight: 700;
+  }
+  .entry {
+    margin-bottom: 8px;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .entry-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
   }
   .entry-title {
     font-size: 10pt;
-    font-weight: bold;
-    margin: 4px 0 1px 0;
+    font-weight: 700;
+    color: #0f172a;
+    margin: 0;
+  }
+  .entry-meta-right {
+    font-size: 9pt;
+    color: #4b5563;
+    white-space: nowrap;
+    font-weight: 500;
   }
   .entry-sub {
     font-size: 9pt;
-    font-style: italic;
-    color: #333333;
-    margin-bottom: 3px;
+    color: #4b5563;
+    margin: 1px 0 3px 0;
+  }
+  .entry-sub a {
+    color: #1f2937;
+    text-decoration: none;
   }
   ul {
-    margin: 2px 0 6px 18px;
+    margin: 3px 0 4px 16px;
     padding: 0;
   }
   li {
-    margin-bottom: 2px;
-    font-size: 9.5pt;
-  }
-  p {
-    margin: 2px 0 6px 0;
-    font-size: 9.5pt;
-  }
-  .skills-row {
-    margin: 2px 0;
-    font-size: 9.5pt;
+    margin-bottom: 2.5px;
+    font-size: 9.6pt;
+    line-height: 1.4;
+    color: #1f2937;
   }
 </style>
 </head>
@@ -180,51 +229,81 @@ function renderAtsProfessionalHtml(p, s, skills, exp, projects, edu, certs) {
   <div class="header">
     <h1>${escapeXml((p.fullName || 'Abhishek N').toUpperCase())}</h1>
     <div class="contact-line">
-      ${escapeXml(p.location)} | ${escapeXml(p.phone)} | ${escapeXml(p.email)}<br>
-      <a href="${p.linkedIn}">${p.linkedIn}</a> |
-      <a href="${p.gitHub}">${p.gitHub}</a> |
-      <a href="${p.portfolio}">${p.portfolio}</a>
+      ${contactParts.join(' &nbsp;|&nbsp; ')}<br>
+      ${linkParts.join(' &nbsp;|&nbsp; ')}
     </div>
   </div>
 
-  <h2>Professional Summary</h2>
-  <p>${escapeXml(s)}</p>
+  <section>
+    <h2>Professional Summary</h2>
+    <p class="summary-text">${escapeXml(s)}</p>
+  </section>
 
-  <h2>Technical Skills</h2>
-  <div class="skills-row"><strong>Programming Languages:</strong> ${(skills.languages || []).join(', ')}</div>
-  <div class="skills-row"><strong>Backend & Java:</strong> ${(skills.backend || []).join(', ')}</div>
-  <div class="skills-row"><strong>Frontend:</strong> ${(skills.frontend || []).join(', ')}</div>
-  <div class="skills-row"><strong>Databases:</strong> ${(skills.databases || []).join(', ')}</div>
-  <div class="skills-row"><strong>Developer Tools:</strong> ${(skills.toolsAndConcepts || []).join(', ')}</div>
+  <section>
+    <h2>Technical Skills</h2>
+    <div class="skills-list">
+      ${skills.languages?.length ? `<div class="skills-row"><strong>Languages:</strong> ${escapeXml(skills.languages.join(', '))}</div>` : ''}
+      ${skills.backend?.length ? `<div class="skills-row"><strong>Backend &amp; Frameworks:</strong> ${escapeXml(skills.backend.join(', '))}</div>` : ''}
+      ${skills.frontend?.length ? `<div class="skills-row"><strong>Frontend &amp; Web:</strong> ${escapeXml(skills.frontend.join(', '))}</div>` : ''}
+      ${skills.databases?.length ? `<div class="skills-row"><strong>Databases:</strong> ${escapeXml(skills.databases.join(', '))}</div>` : ''}
+      ${skills.toolsAndConcepts?.length ? `<div class="skills-row"><strong>Tools &amp; Core Concepts:</strong> ${escapeXml(skills.toolsAndConcepts.join(', '))}</div>` : ''}
+    </div>
+  </section>
 
-  <h2>Internships & Practical Training</h2>
-  ${exp.map(e => `
-    <div class="entry-title">${escapeXml(e.role)} — ${escapeXml(e.company)}</div>
-    <div class="entry-sub">${escapeXml(e.period)} | ${escapeXml(e.type || 'Internship')}</div>
+  ${exp.length ? `
+  <section>
+    <h2>Experience &amp; Training</h2>
+    ${exp.map(e => `
+      <div class="entry">
+        <div class="entry-header">
+          <div class="entry-title">${escapeXml(e.role)} &mdash; ${escapeXml(e.company)}</div>
+          <div class="entry-meta-right">${escapeXml(e.period)}${e.type ? ` (${escapeXml(e.type)})` : ''}</div>
+        </div>
+        <ul>
+          ${(e.bullets || []).map(b => `<li>${escapeXml(b)}</li>`).join('')}
+        </ul>
+      </div>
+    `).join('')}
+  </section>` : ''}
+
+  ${projects.length ? `
+  <section>
+    <h2>Technical Projects</h2>
+    ${projects.map(proj => `
+      <div class="entry">
+        <div class="entry-header">
+          <div class="entry-title">${escapeXml(proj.name)}</div>
+          ${proj.url ? `<div class="entry-meta-right"><a href="${escapeXml(proj.url)}">${escapeXml(cleanUrlLabel(proj.url))}</a></div>` : ''}
+        </div>
+        ${proj.techStack?.length ? `<div class="entry-sub"><strong>Technologies:</strong> ${escapeXml(proj.techStack.join(', '))}${proj.github ? ` &nbsp;|&nbsp; Code: <a href="${escapeXml(proj.github)}">${escapeXml(cleanUrlLabel(proj.github))}</a>` : ''}</div>` : ''}
+        <ul>
+          ${(proj.bullets || []).map(b => `<li>${escapeXml(b)}</li>`).join('')}
+        </ul>
+      </div>
+    `).join('')}
+  </section>` : ''}
+
+  ${edu.length ? `
+  <section>
+    <h2>Education</h2>
+    ${edu.map(ed => `
+      <div class="entry">
+        <div class="entry-header">
+          <div class="entry-title">${escapeXml(ed.degree)} &mdash; ${escapeXml(ed.institution)}</div>
+          <div class="entry-meta-right">${escapeXml(ed.period)}</div>
+        </div>
+        ${(ed.status || ed.highlights) ? `<div class="entry-sub">${escapeXml([ed.status, ed.highlights].filter(Boolean).join(' • '))}</div>` : ''}
+      </div>
+    `).join('')}
+  </section>` : ''}
+
+  ${certs.length ? `
+  <section>
+    <h2>Certifications &amp; Achievements</h2>
     <ul>
-      ${(e.bullets || []).map(b => `<li>${escapeXml(b)}</li>`).join('')}
+      ${certs.map(c => `<li>${escapeXml(c)}</li>`).join('')}
     </ul>
-  `).join('')}
-
-  <h2>Relevant Projects</h2>
-  ${projects.map(proj => `
-    <div class="entry-title">${escapeXml(proj.name)}</div>
-    <div class="entry-sub">Tech Stack: ${(proj.techStack || []).join(', ')} ${proj.url ? `| Link: ${proj.url}` : ''}</div>
-    <ul>
-      ${(proj.bullets || []).map(b => `<li>${escapeXml(b)}</li>`).join('')}
-    </ul>
-  `).join('')}
-
-  <h2>Education</h2>
-  ${edu.map(ed => `
-    <div class="entry-title">${escapeXml(ed.degree)} — ${escapeXml(ed.institution)}</div>
-    <div class="entry-sub">${escapeXml(ed.period)} ${ed.status ? `(${escapeXml(ed.status)})` : ''} ${ed.highlights ? `| ${escapeXml(ed.highlights)}` : ''}</div>
-  `).join('')}
-
-  <h2>Certifications & Achievements</h2>
-  <ul>
-    ${certs.map(c => `<li>${escapeXml(c)}</li>`).join('')}
-  </ul>
+  </section>` : ''}
 </body>
 </html>`;
 }

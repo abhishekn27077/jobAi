@@ -100,11 +100,11 @@ export function validateJobRecord(rawJob) {
 
   // 9. Source & Source Confidence
   const source = (rawJob.source || 'direct').toLowerCase();
-  let sourceConfidence = 0.7;
-  if (['lever', 'ashby', 'greenhouse', 'smartrecruiters', 'workday'].includes(source)) {
-    sourceConfidence = 1.0; // Official direct corporate ATS
+  let sourceConfidence = typeof rawJob.sourceConfidence === 'number' ? rawJob.sourceConfidence : 0.7;
+  if (['lever', 'ashby', 'greenhouse', 'smartrecruiters', 'workday', 'workable', 'recruitee'].includes(source)) {
+    sourceConfidence = typeof rawJob.sourceConfidence === 'number' ? rawJob.sourceConfidence : 1.0; // Official direct corporate ATS
   } else if (['freehire', 'linkedin', 'naukri', 'indeed', 'cutshort'].includes(source)) {
-    sourceConfidence = 0.85; // Curated aggregator / job board
+    sourceConfidence = typeof rawJob.sourceConfidence === 'number' ? rawJob.sourceConfidence : 0.85; // Curated aggregator / job board
   }
 
   // 10. Data Completeness Score (0.0 to 1.0)
