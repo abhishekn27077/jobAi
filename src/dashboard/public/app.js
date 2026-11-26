@@ -336,6 +336,13 @@ function setupEventListeners() {
     });
   }
 
+  const chkNonMatching = document.getElementById('chkExcludeNonMatching');
+  if (chkNonMatching) {
+    chkNonMatching.addEventListener('change', (e) => {
+      syncHideNonMatching(e.target.checked);
+    });
+  }
+
   // Import Job URL from External Gateway
   const btnImport = document.getElementById('btnImportJobUrl');
   if (btnImport) {
@@ -348,7 +355,7 @@ function setupEventListeners() {
       }
 
       btnImport.disabled = true;
-      btnImport.textContent = '⏳ Importing...';
+      btnImport.textContent = 'Importing...';
       try {
         const resp = await fetch('/api/job/import-url', {
           method: 'POST',
@@ -356,19 +363,22 @@ function setupEventListeners() {
           body: JSON.stringify({ url: rawUrl, source: window.unifiedSearchState?.source || 'other' })
         });
         const res = await resp.json();
-        if (res.success) {
-          showToast(`✅ Successfully imported role #${res.jobId || ''}!`, 'success');
+        if (res.unsupportedExtraction && res.unsupportedExtraction.length > 0 && res.imported === 0) {
+          showToast(res.unsupportedExtraction[0].reason, 'warning');
+          openImportJobsModal();
+        } else if (res.success && (res.imported > 0 || res.duplicates > 0)) {
+          showToast(`Imported ${res.imported} job(s) (${res.duplicates || 0} duplicate(s)).`, 'success');
           inputEl.value = '';
           await performUnifiedSearch();
-          if (res.jobId) openDetailDrawerForJob(res.jobId);
+          if (res.imported === 1 && res.jobId) openDetailDrawerForJob(res.jobId);
         } else {
-          alert('Import failed: ' + (res.error || 'Unknown error'));
+          alert('Import failed: ' + (res.error || 'No jobs extracted'));
         }
       } catch (err) {
         alert('Import error: ' + err.message);
       } finally {
         btnImport.disabled = false;
-        btnImport.textContent = '📥 Import URL';
+        btnImport.textContent = 'Import URL';
       }
     });
   }
@@ -775,8 +785,11 @@ window.unifiedSearchState = {
   minScore: 0,
   sortBy: 'relevance',
   excludeExpired: true,
-  excludeApplied: false,
-  excludeSaved: false
+  excludeApplied: true,
+  excludeSaved: false,
+  excludeNonMatching: true,
+  currentPage: 1,
+  pageSize: 20
 };
 
 async function loadJobs() {
@@ -808,8 +821,9 @@ async function performUnifiedSearch() {
       priority: state.priority || 'all',
       sort: state.sortBy,
       excludeExpired: state.excludeExpired,
-      excludeApplied: state.excludeApplied,
+      excludeApplied: state.currentFilter === 'applied' ? false : state.excludeApplied,
       excludeSaved: state.excludeSaved,
+      excludeNonMatching: state.currentFilter === 'applied' ? false : (state.excludeNonMatching !== false),
       locationRegion: state.locationRegion || 'all',
       limit: 1500
     };
@@ -950,7 +964,7 @@ window.resetAllUnifiedFilters = function () {
     priority: 'all',
     sortBy: 'relevance',
     excludeExpired: true,
-    excludeApplied: false,
+    excludeApplied: true,
     excludeSaved: false
   };
 
@@ -988,7 +1002,8 @@ function renderSearchResults(filtered, searchData) {
   if (state.priority && state.priority !== 'all') activeFilters.push(`Priority: ${escapeHtml(state.priority)}`);
   if (state.currentFilter && state.currentFilter !== 'all') activeFilters.push(`Tab: ${escapeHtml(state.currentFilter)}`);
 
-  const totalScanned = document.getElementById('statTotal')?.textContent || '1,342';
+  const rawStatTotal = document.getElementById('statTotal')?.textContent;
+  const totalScanned = (rawStatTotal && rawStatTotal !== '0') ? rawStatTotal : (searchData?.summary?.totalSourceResults || filtered.length);
 
   if (activeFilters.length > 0 && filtered.length > 0) {
     const filterBanner = document.createElement('div');
@@ -1022,12 +1037,183 @@ function renderSearchResults(filtered, searchData) {
         <button class="btn btn-outline btn-sm" onclick="resetAllUnifiedFilters()">↺ Reset All Filters</button>
       </div>
     `;
+    renderJobsPagination(0, 1, 20, 1);
     return;
   }
 
-  filtered.forEach(job => {
+  const pageSize = state.pageSize || 20;
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(Math.max(1, state.currentPage || 1), totalPages);
+  state.currentPage = currentPage;
+  const startIdx = (currentPage - 1) * pageSize;
+  const pageItems = filtered.slice(startIdx, startIdx + pageSize);
+
+  renderJobsPagination(filtered.length, currentPage, pageSize, totalPages);
+
+  pageItems.forEach(job => {
     grid.appendChild(createJobCard(job));
   });
+}
+
+function renderJobsPagination(total, currentPage, pageSize, totalPages) {
+  const topEl = document.getElementById('jobsPaginationTop');
+  const botEl = document.getElementById('jobsPaginationBottom');
+  if (!topEl && !botEl) return;
+
+  if (total === 0) {
+    if (topEl) topEl.classList.add('hidden');
+    if (botEl) botEl.classList.add('hidden');
+    return;
+  }
+
+  const startNum = (currentPage - 1) * pageSize + 1;
+  const endNum = Math.min(total, currentPage * pageSize);
+
+  const pages = [];
+  const startPage = Math.max(1, currentPage - 2);
+  const endPage = Math.min(totalPages, currentPage + 2);
+  for (let p = startPage; p <= endPage; p++) {
+    pages.push(`<button type="button" class="page-btn ${p === currentPage ? 'active' : ''}" onclick="goToJobsPage(${p})">${p}</button>`);
+  }
+
+  const html = `
+    <div class="pagination-info">Showing <strong>${startNum}–${endNum}</strong> of <strong>${total}</strong> profile-matched jobs</div>
+    <div class="pagination-controls">
+      <button type="button" class="page-btn" ${currentPage <= 1 ? 'disabled' : ''} onclick="goToJobsPage(${currentPage - 1})">&laquo; Prev</button>
+      ${pages.join('')}
+      <button type="button" class="page-btn" ${currentPage >= totalPages ? 'disabled' : ''} onclick="goToJobsPage(${currentPage + 1})">Next &raquo;</button>
+    </div>
+  `;
+
+  if (topEl) { topEl.innerHTML = html; topEl.classList.remove('hidden'); }
+  if (botEl) { botEl.innerHTML = html; botEl.classList.remove('hidden'); }
+}
+
+window.goToJobsPage = function (page) {
+  if (!window.unifiedSearchState) return;
+  window.unifiedSearchState.currentPage = page;
+  renderSearchResults(window.allSearchResults || [], null);
+  document.getElementById('jobsPaginationTop')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+};
+
+window.syncSidebarFilter = function (selectId, value) {
+  const sel = document.getElementById(selectId);
+  if (sel) {
+    sel.value = value;
+    sel.dispatchEvent(new Event('change'));
+  }
+  if (window.unifiedSearchState) {
+    window.unifiedSearchState.currentPage = 1;
+  }
+};
+
+window.syncHideNonMatching = function (checked) {
+  if (window.unifiedSearchState) {
+    window.unifiedSearchState.excludeNonMatching = Boolean(checked);
+    window.unifiedSearchState.currentPage = 1;
+  }
+  const chk1 = document.getElementById('chkExcludeNonMatching');
+  const chk2 = document.getElementById('sbHideNonMatching');
+  if (chk1) chk1.checked = Boolean(checked);
+  if (chk2) chk2.checked = Boolean(checked);
+  performUnifiedSearch();
+};
+
+window.copyVisibleJobsExtractorScript = async function () {
+  const snippet = `(() => {
+  const jobs = [];
+  document.querySelectorAll('.srp-jobtuple-wrapper, .cust-job-tuple, article.jobTuple').forEach(el => {
+    const a = el.querySelector('a.title, a[href*="/job-listings-"]');
+    const comp = el.querySelector('a.comp-name, .comp-name');
+    const loc = el.querySelector('.locWdth, .loc-wrap');
+    const exp = el.querySelector('.expwdth, .exp-wrap');
+    const desc = el.querySelector('.job-desc');
+    if (a && a.href) jobs.push({
+      title: (a.textContent || '').trim(),
+      company: (comp?.textContent || 'External Employer').trim(),
+      location: (loc?.textContent || 'Bengaluru').trim(),
+      url: a.href.split('?')[0],
+      source: 'naukri',
+      description: [exp?.textContent?.trim(), desc?.textContent?.trim()].filter(Boolean).join(' | ')
+    });
+  });
+  document.querySelectorAll('.jobs-search-results__list-item, .scaffold-layout__list-item, .base-card').forEach(el => {
+    const a = el.querySelector('a[href*="/jobs/view/"]');
+    const title = el.querySelector('.job-card-list__title, .base-search-card__title, strong');
+    const comp = el.querySelector('.job-card-container__primary-description, .base-search-card__subtitle');
+    const loc = el.querySelector('.job-card-container__metadata-item, .job-search-card__location');
+    if (a && a.href) jobs.push({
+      title: (title?.textContent || a.textContent || '').trim(),
+      company: (comp?.textContent || 'External Employer').trim(),
+      location: (loc?.textContent || 'Bengaluru').trim(),
+      url: a.href.split('?')[0],
+      source: 'linkedin'
+    });
+  });
+  const out = JSON.stringify(jobs, null, 2);
+  copy(out);
+  console.log('Copied ' + jobs.length + ' jobs to clipboard! Paste into CareerOS Import Jobs.');
+})();`;
+  try {
+    await navigator.clipboard.writeText(snippet);
+    if (typeof showToast === 'function') showToast('Copied Browser Extractor! Paste in F12 Console on Naukri/LinkedIn.', 'success');
+  } catch {
+    prompt('Copy this script and run in DevTools Console (F12):', snippet);
+  }
+};
+
+window.applyQuickFilter = function (kind, btnEl) {
+  document.querySelectorAll('.quick-pill-btn').forEach(b => b.classList.remove('active'));
+  if (btnEl) btnEl.classList.add('active');
+  const state = window.unifiedSearchState;
+  if (!state) return;
+
+  if (kind === 'fresher') {
+    state.experience = 'fresher';
+    const sel = document.getElementById('experienceSelect');
+    if (sel) sel.value = 'fresher';
+  } else if (kind === '24h' || kind === '7d') {
+    state.datePosted = kind;
+    const sel = document.getElementById('datePostedSelect');
+    if (sel) sel.value = kind;
+  } else if (kind === 'strong') {
+    state.currentFilter = 'RECOMMENDED';
+    document.querySelectorAll('.filter-tab').forEach(t => t.classList.toggle('active', t.dataset.filter === 'RECOMMENDED'));
+  } else if (kind === 'remote') {
+    state.workMode = 'remote';
+    const sel = document.getElementById('workModeSelect');
+    if (sel) sel.value = 'remote';
+  } else if (kind === 'bengaluru') {
+    state.locations = new Set(['bengaluru']);
+    const sel = document.getElementById('locationFilterSelect');
+    if (sel) sel.value = 'bengaluru';
+  }
+  state.currentPage = 1;
+  performUnifiedSearch();
+};
+
+window.toggleMobileSidebar = function () {
+  const sb = document.querySelector('.jobs-sidebar-card');
+  if (sb) sb.classList.toggle('mobile-open');
+};
+
+function getCompanyMonogram(company = '') {
+  const clean = String(company || 'CO').replace(/[^a-zA-Z0-9\s]/g, '').trim();
+  const words = clean.split(/\s+/).filter(Boolean);
+  const initials = words.length >= 2
+    ? (words[0][0] + words[1][0]).toUpperCase()
+    : clean.slice(0, 2).toUpperCase() || 'CO';
+  const gradients = [
+    'linear-gradient(135deg, #2563eb, #4f46e5)',
+    'linear-gradient(135deg, #059669, #0d9488)',
+    'linear-gradient(135deg, #7c3aed, #db2777)',
+    'linear-gradient(135deg, #d97706, #ea580c)',
+    'linear-gradient(135deg, #0284c7, #2563eb)'
+  ];
+  let hash = 0;
+  for (let i = 0; i < clean.length; i++) hash = (hash * 31 + clean.charCodeAt(i)) | 0;
+  const bg = gradients[Math.abs(hash) % gradients.length];
+  return { initials, bg };
 }
 
 function createJobCard(job) {
@@ -1074,20 +1260,23 @@ function createJobCard(job) {
   }
 
   const isExpired = (job.status === 'expired' || job.verification_status === 'expired' || job.recommendation === 'EXPIRED' || fStatus === 'expired' || fStatus === 'closed');
-  const isAlreadyApplied = ['applied', 'submitted', 'user_submitted', 'interviewing', 'offer'].includes((job.status || '').toLowerCase());
-  const isInProgress = (job.status || '').toLowerCase() === 'ready_to_apply';
+  const isAlreadyApplied = Boolean(job.alreadySubmitted) || ['applied', 'submitted', 'user_submitted', 'interviewing', 'offer'].includes((job.status || '').toLowerCase());
   const appliedDateTag = job.applied_date ? ` (${String(job.applied_date).split('T')[0]})` : '';
   const dupBadgeHtml = isAlreadyApplied
-    ? `<span class="dup-status-badge dup-applied">ALREADY APPLIED${escapeHtml(appliedDateTag)}</span>`
-    : (isInProgress ? `<span class="dup-status-badge dup-progress">APPLICATION IN PROGRESS</span>` : '');
+    ? `<a href="#applications" onclick="switchWorkspaceView('applications'); return false;" class="dup-status-badge dup-applied" title="View in Applied Jobs">ALREADY APPLIED${escapeHtml(appliedDateTag)}</a>`
+    : '';
 
-  // Key match points
+  // Key match points (3 matched + 2 missing + overflow indicator)
   const matchedList = job.skills_matched || [];
-  const matchedChips = matchedList.slice(0, 4).map(s => `<span class="skill-tag skill-matched">${escapeHtml(s)}</span>`).join('');
-  const missingChips = (job.skills_missing || []).slice(0, 2).map(s => `<span class="skill-tag skill-missing">${escapeHtml(s)}</span>`).join('');
+  const missingList = job.skills_missing || [];
+  const matchedChips = matchedList.slice(0, 3).map(s => `<span class="skill-tag skill-matched">${escapeHtml(s)}</span>`).join('');
+  const missingChips = missingList.slice(0, 2).map(s => `<span class="skill-tag skill-missing">${escapeHtml(s)}</span>`).join('');
+  const overflowCount = Math.max(0, matchedList.length - 3) + Math.max(0, missingList.length - 2);
+  const overflowChip = overflowCount > 0 ? `<span class="skill-overflow-pill">+${overflowCount} more</span>` : '';
 
-  // Grounded crisp match reason
-  const matchReason = job.summary_reason || (Array.isArray(job.whyMatches) && job.whyMatches[0]) || 'Grounded match evaluated against verified profile.';
+  // Grounded crisp 1-line match summary (full details in Details drawer)
+  const rawReason = job.summary_reason || (Array.isArray(job.whyMatches) && job.whyMatches[0]) || 'Evaluated against verified profile.';
+  const matchReason = rawReason.length > 115 ? `${rawReason.slice(0, 112).trim()}...` : rawReason;
 
   // Exp / Degree tag
   const expLabel = job.experience_min !== null
@@ -1113,23 +1302,31 @@ function createJobCard(job) {
     </span>
   ` : '';
 
+  const mono = getCompanyMonogram(job.company);
+
   card.innerHTML = `
     <div class="job-card-compact-header">
-      <div class="job-card-title-line">
-        <a href="${escapeHtml(job.url)}" target="_blank" rel="noopener noreferrer" class="job-title-link" title="Open official job vacancy in new tab">
-          ${escapeHtml(job.title)} <span class="external-icon">↗</span>
-        </a>
-        <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+      <div class="job-card-top-row">
+        <div class="job-card-identity">
+          <div class="company-monogram" style="background: ${mono.bg};" aria-hidden="true">${escapeHtml(mono.initials)}</div>
+          <div class="job-title-block">
+            <a href="${escapeHtml(job.url)}" target="_blank" rel="noopener noreferrer" class="job-title-link" title="Open official job vacancy in new tab">
+              ${escapeHtml(job.title)} <span class="external-icon">↗</span>
+            </a>
+            <div class="job-card-meta-line" style="margin-top: 4px;">
+              <span class="job-company-name"><strong>${escapeHtml(job.company)}</strong></span>
+              <span class="meta-separator">&middot;</span>
+              <span class="job-location">${escapeHtml(job.location || 'Bengaluru, India')}${geoCountry && !String(job.location || '').includes(geoCountry) ? ` (${escapeHtml(geoCountry)})` : ''}</span>
+            </div>
+          </div>
+        </div>
+        <div class="job-card-scores-col">
           ${dupBadgeHtml}
-          <span class="match-score-pill" title="Internal profile match estimate (not an employer ATS score)">Match: ${scoreEst}/100 (Est.)</span>
+          <span class="match-score-pill" title="Internal profile match estimate (not an employer ATS score)">Match: ${scoreEst}/100</span>
           <span class="priority-badge priority-${priorityCode}" title="${escapeHtml(priorityReasons)}">${escapeHtml(priorityTier)}</span>
         </div>
       </div>
-      <div class="job-card-meta-line">
-        <span class="job-company-name"><strong>${escapeHtml(job.company)}</strong></span>
-        <span class="meta-separator">&middot;</span>
-        <span class="job-location">${escapeHtml(job.location || 'Bengaluru, India')}${geoCountry && !String(job.location || '').includes(geoCountry) ? ` (${escapeHtml(geoCountry)})` : ''}</span>
-        <span class="meta-separator">&middot;</span>
+      <div class="job-card-meta-line" style="margin-top: 8px;">
         <span class="job-exp">${expLabel}</span>
         ${job.salary ? `<span class="meta-separator">&middot;</span><span>${escapeHtml(job.salary)}</span>` : ''}
         <span class="meta-separator">&middot;</span>
@@ -1150,6 +1347,7 @@ function createJobCard(job) {
       <div class="match-tags-inline">
         ${matchedChips}
         ${missingChips}
+        ${overflowChip}
       </div>
     </div>
 
@@ -1157,22 +1355,28 @@ function createJobCard(job) {
       <div class="primary-actions-group">
         ${isExpired
       ? `<button class="btn btn-outline btn-sm btn-disabled" disabled>Expired</button>`
-      : `${isAlreadyApplied
-        ? `<button class="btn btn-outline btn-sm btn-apply-disabled" disabled title="You have already applied to this opening">Already Applied</button>`
-        : `<button class="btn btn-primary btn-sm btn-individual-apply" onclick="assistApplication(${job.id})" title="Run human-controlled Individual Application Assistant">Apply</button>`
-      }
-         <button class="btn btn-outline btn-sm btn-generate-ats" onclick="tailorAndOpenAtsResume(${job.id})" title="Generate 1-click ATS-tailored resume PDF for this role">Generate ATS Resume</button>
-         <a href="${escapeHtml(job.url)}" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-sm btn-open-job" title="Open original job website">Original Link ↗</a>`
+      : `<a href="${escapeHtml(job.url)}" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-sm btn-open-job" aria-label="Apply to ${escapeHtml(job.title)} at ${escapeHtml(job.company)}" title="Open original employer application URL in new tab">Apply ↗</a>
+         <button class="btn btn-outline btn-sm btn-generate-ats" onclick="tailorAndOpenAtsResume(${job.id})" title="Generate tailored ATS resume PDF">ATS Resume</button>
+         <button class="btn btn-outline btn-sm btn-find-recruiter" onclick="openFindRecruiterModal(${job.id})" title="Find HR / hiring contacts">Find HR</button>
+         ${job.status !== 'saved'
+        ? `<button class="btn btn-outline btn-sm" onclick="setJobStatus(${job.id}, 'saved')" title="Save job">Save</button>`
+        : `<button class="btn btn-outline btn-sm" onclick="setJobStatus(${job.id}, 'discovered')" title="Remove from saved">Saved ✓</button>`
+      }`
     }
       </div>
       <div class="secondary-actions-group">
-        <button class="btn btn-outline btn-sm btn-find-recruiter" onclick="openFindRecruiterModal(${job.id})" title="Discover hiring contacts and prepare approved outreach">Find Recruiter</button>
-        <button class="btn btn-outline btn-sm btn-drawer-inspect" onclick="openDetailDrawerForJob(${job.id})" title="Inspect complete job details &amp; screening dossier">Details</button>
-        ${job.status !== 'saved'
-      ? `<button class="btn btn-outline btn-sm" onclick="setJobStatus(${job.id}, 'saved')" title="Save to pipeline">Save</button>`
-      : `<button class="btn btn-outline btn-sm" onclick="setJobStatus(${job.id}, 'discovered')" title="Remove from saved">Unsave</button>`
-    }
-        <button class="btn btn-ghost btn-sm btn-dismiss-card" onclick="dismissJobCard(${job.id})" title="Dismiss card">✕</button>
+        <button class="btn btn-ghost btn-sm btn-drawer-inspect" onclick="openDetailDrawerForJob(${job.id})" title="Inspect full job description &amp; eligibility">Details</button>
+        <details class="card-more-menu">
+          <summary class="btn btn-ghost btn-sm" aria-label="More actions">More ▾</summary>
+          <div class="card-more-dropdown">
+            ${isAlreadyApplied
+              ? `<button type="button" class="card-more-item" onclick="switchWorkspaceView('applications')">View in Applied Jobs</button>
+                 <button type="button" class="card-more-item" onclick="undoSubmittedManually(${job.id})">Undo Submitted</button>`
+              : `<button type="button" class="card-more-item" onclick="markJobSubmittedManually(${job.id})">Mark as Submitted</button>`
+            }
+            <button type="button" class="card-more-item" onclick="dismissJobCard(${job.id})">Hide from View</button>
+          </div>
+        </details>
       </div>
     </div>
   `;
@@ -1605,6 +1809,7 @@ window.switchWorkspaceView = function (viewId, updateHash = true) {
 
   // 2. Switch Workspace Views
   const viewMap = {
+    'dashboard': 'viewDashboard',
     'jobs': 'viewJobs',
     'applications': 'viewApplications',
     'resume-studio': 'viewResumeStudio',
@@ -1612,7 +1817,8 @@ window.switchWorkspaceView = function (viewId, updateHash = true) {
     'comms': 'viewComms',
     'intelligence': 'viewIntelligence',
     'profile': 'viewProfile',
-    'settings': 'viewSettings'
+    'settings': 'viewSettings',
+    'agent-tasks': 'viewAgentTasks'
   };
 
   const targetContainerId = viewMap[viewId] || 'viewJobs';
@@ -1629,7 +1835,9 @@ window.switchWorkspaceView = function (viewId, updateHash = true) {
   }
 
   // 3. View Data Dispatcher
-  if (viewId === 'applications') {
+  if (viewId === 'dashboard') {
+    loadAndRenderDashboardView();
+  } else if (viewId === 'applications') {
     loadAndRenderApplicationsPipeline();
   } else if (viewId === 'contacts') {
     loadAndRenderContactsView();
@@ -1643,6 +1851,8 @@ window.switchWorkspaceView = function (viewId, updateHash = true) {
     loadAndRenderSettingsView();
   } else if (viewId === 'resume-studio') {
     loadAndRenderResumeStudioView();
+  } else if (viewId === 'agent-tasks') {
+    loadAndRenderAgentTasksView();
   }
 
   // 4. Update URL Hash
@@ -5849,12 +6059,16 @@ window.loadSavedSearches = async function () {
       container.innerHTML = `<span style="font-size: 12px; color: var(--text-muted);">No saved searches yet.</span>`;
       return;
     }
-    container.innerHTML = list.map(s => `
-      <span class="saved-search-chip">
+    container.innerHTML = list.map(s => {
+      const criteria = [s.query, ...(s.filters?.location || []), s.filters?.experience, s.filters?.source].filter(Boolean).join(' • ');
+      return `
+      <span class="saved-search-chip" title="${escapeHtml(criteria)}">
         <button type="button" class="saved-search-apply-btn" onclick='applySavedSearch(${JSON.stringify(s).replace(/'/g, "&#39;")})'>${escapeHtml(s.name)}</button>
+        <button type="button" class="saved-search-del-btn" onclick="renameSavedSearch(${s.id}, '${escapeHtml(s.name).replace(/'/g, "\\'")}')" title="Rename saved search">✎</button>
         <button type="button" class="saved-search-del-btn" onclick="deleteSavedSearch(${s.id})" title="Delete saved search">&times;</button>
       </span>
-    `).join('');
+    `;
+    }).join('');
   } catch { }
 };
 
@@ -5880,6 +6094,17 @@ window.applySavedSearch = function (saved) {
     }
   }
   performUnifiedSearch();
+};
+
+window.renameSavedSearch = async function (id, oldName) {
+  const next = prompt('Rename saved search:', oldName || '');
+  if (!next || !next.trim() || next.trim() === oldName) return;
+  await fetch(`/api/saved-searches/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: next.trim() })
+  });
+  loadSavedSearches();
 };
 
 window.deleteSavedSearch = async function (id) {
@@ -6109,29 +6334,40 @@ window.loadAndRenderContactsView = async function () {
     const res = await fetch('/api/recruiter-hub/contacts').then(r => r.json());
     const contacts = res.contacts || [];
 
-    const rows = contacts.map(c => `
+    const rows = contacts.map(c => {
+      const linkedInUrl = c.profile_url || `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(`${c.company} ${c.role || 'Recruiter'}`)}`;
+      return `
       <tr class="app-table-row">
         <td class="app-table-cell">
           <strong>${escapeHtml(c.name || 'Hiring Contact')}</strong>
-          <div class="app-row-company">${escapeHtml(c.role || 'Recruiter')}</div>
+          <div class="app-row-company">${escapeHtml(c.role || 'Recruiter')} &middot; Score ${Math.round(c.relevance_score || 0)}</div>
+          <a href="${escapeHtml(linkedInUrl)}" target="_blank" rel="noopener noreferrer" style="font-size: 11px; color: var(--primary-light);">${c.profile_url ? 'LinkedIn Profile ↗' : 'LinkedIn Search ↗'}</a>
         </td>
         <td class="app-table-cell">
           <strong>${escapeHtml(c.company)}</strong>
           ${c.job_title ? `<div class="app-row-company">${escapeHtml(c.job_title)}</div>` : ''}
         </td>
-        <td class="app-table-cell">${c.email ? escapeHtml(c.email) : '<span style="color: var(--text-muted);">Unavailable</span>'}</td>
+        <td class="app-table-cell">
+          ${c.email ? `<span>${escapeHtml(c.email)}</span>` : '<span style="color: var(--text-muted);">Not found</span>'}
+          <div class="app-row-company">${escapeHtml(c.email_evidence || c.verification_status || 'Unverified')}</div>
+        </td>
         <td class="app-table-cell"><span class="verif-chip">${escapeHtml(c.verification_status)}</span></td>
-        <td class="app-table-cell">${escapeHtml(c.discovery_source || 'Public')}</td>
+        <td class="app-table-cell">
+          <div>${escapeHtml(c.discovery_source || 'Public')}</div>
+          ${c.last_contact_date ? `<div class="app-row-company">Sent ${escapeHtml(String(c.last_contact_date).slice(0, 10))}</div>` : ''}
+        </td>
         <td class="app-table-cell">
           <select class="app-table-stage-select" onchange="updateOutreachStatusFromHub(${c.id}, this.value)">
-            ${['Not Contacted', 'Draft', 'Approved', 'Sent', 'Reply Received', 'Follow-up Due', 'Closed'].map(st => `<option value="${st}" ${c.outreach_status === st ? 'selected' : ''}>${st}</option>`).join('')}
+            ${['Not Contacted', 'Draft', 'Approved', 'Sent', 'Reply Received', 'Follow-up Due', 'No Response', 'Closed'].map(st => `<option value="${st}" ${c.outreach_status === st ? 'selected' : ''}>${st}</option>`).join('')}
           </select>
         </td>
-        <td class="app-table-cell">
-          <button class="btn btn-primary btn-sm" onclick="openOutreachComposer(${c.id})">Compose Outreach</button>
+        <td class="app-table-cell" style="display:flex; gap:6px; flex-wrap:wrap;">
+          <button class="btn btn-primary btn-sm" onclick="openOutreachComposer(${c.id}, 'email', ${c.job_id || 'null'})">Draft Email</button>
+          <button class="btn btn-outline btn-sm" onclick="openOutreachComposer(${c.id}, 'linkedin_message', ${c.job_id || 'null'})">LinkedIn Msg</button>
         </td>
       </tr>
-    `).join('');
+    `;
+    }).join('');
 
     container.innerHTML = `
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
@@ -6176,15 +6412,22 @@ window.openFindRecruiterModal = async function (jobId) {
     const data = await resp.json();
     if (!data.success) throw new Error(data.error);
 
-    const contactsHtml = (data.contacts || []).map(c => `
+    const contactsHtml = (data.contacts || []).map(c => {
+      const liUrl = c.profile_url || `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(`${c.company} ${c.role || 'Recruiter'}`)}`;
+      return `
       <div style="padding: 10px; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap;">
         <div>
-          <strong>${escapeHtml(c.name)}</strong> (${escapeHtml(c.role)})<br>
-          <span style="font-size: 12px; color: var(--text-muted);">${c.email ? escapeHtml(c.email) : 'No public email verified'} &middot; Status: <strong>${escapeHtml(c.verification_status)}</strong> &middot; Source: ${escapeHtml(c.discovery_source)}</span>
+          <strong>${escapeHtml(c.name)}</strong> (${escapeHtml(c.role)}) &middot; <span style="font-size:11px; color:var(--text-muted);">Relevance ${Math.round(c.relevance_score || 0)}/100</span><br>
+          <span style="font-size: 12px; color: var(--text-muted);">${c.email ? escapeHtml(c.email) : 'No public email found'} &middot; Evidence: <strong>${escapeHtml(c.email_evidence || c.verification_status)}</strong> &middot; Source: ${escapeHtml(c.discovery_source)}</span><br>
+          <a href="${escapeHtml(liUrl)}" target="_blank" rel="noopener noreferrer" style="font-size: 11px; color: var(--primary-light);">${c.profile_url ? 'Open LinkedIn Profile ↗' : 'Search on LinkedIn ↗'}</a>
         </div>
-        <button class="btn btn-primary btn-sm" onclick="openOutreachComposer(${c.id})">Prepare Outreach</button>
+        <div style="display:flex; gap:6px; flex-wrap:wrap;">
+          <button class="btn btn-primary btn-sm" onclick="openOutreachComposer(${c.id}, 'email', ${jobId})">Draft Email</button>
+          <button class="btn btn-outline btn-sm" onclick="openOutreachComposer(${c.id}, 'linkedin_message', ${jobId})">LinkedIn Msg</button>
+        </div>
       </div>
-    `).join('');
+    `;
+    }).join('');
 
     const linksHtml = (data.searchLinks || []).map(l => `
       <a href="${escapeHtml(l.url)}" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-sm">${escapeHtml(l.label)} ↗</a>
@@ -6277,35 +6520,62 @@ window.submitManualContact = async function () {
   loadAndRenderContactsView();
 };
 
-window.openOutreachComposer = async function (contactId) {
-  openModal('Outreach Composer (Human Approval Required)', `<div style="padding: 20px; text-align: center;">Generating personalized, profile-grounded draft...</div>`);
+window.openOutreachComposer = async function (contactId, channel = 'email', jobId = null) {
+  openModal('Outreach Composer (Manual Send Only)', `<div style="padding: 20px; text-align: center;">Generating personalized, profile-grounded draft...</div>`);
   try {
-    const resp = await fetch(`/api/recruiter-hub/contacts/${contactId}/outreach-draft`, {
+    const resp = await fetch(`/api/outreach/drafts`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ draftType: 'application_follow_up' })
+      body: JSON.stringify({ contactId, jobId, channel })
     });
     const data = await resp.json();
     if (!data.success) throw new Error(data.error);
+    const d = data.draft;
+    const mailtoHref = d.mailtoUrl || (d.recipient_email ? `mailto:${encodeURIComponent(d.recipient_email)}?subject=${encodeURIComponent(d.subject || '')}&body=${encodeURIComponent(d.body || '')}` : '');
 
     document.getElementById('modalBody').innerHTML = `
       <div style="display: flex; flex-direction: column; gap: 10px;">
-        <div style="font-size: 12px; color: var(--text-muted);">
-          To: <strong>${escapeHtml(data.contact.name)}</strong> (${escapeHtml(data.contact.email || 'Copy & send manually')})
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+          <div style="font-size: 12px; color: var(--text-muted);">
+            To: <strong>${escapeHtml(d.recipient_name || 'Hiring Contact')}</strong> (${escapeHtml(d.recipient_email || 'Copy & send manually')})
+          </div>
+          <div style="display:flex; gap:6px;">
+            <button class="btn ${channel === 'email' ? 'btn-primary' : 'btn-outline'} btn-sm" onclick="openOutreachComposer(${contactId}, 'email', ${jobId || 'null'})">Email</button>
+            <button class="btn ${channel === 'linkedin_message' ? 'btn-primary' : 'btn-outline'} btn-sm" onclick="openOutreachComposer(${contactId}, 'linkedin_message', ${jobId || 'null'})">LinkedIn</button>
+            <button class="btn ${channel === 'connection_request' ? 'btn-primary' : 'btn-outline'} btn-sm" onclick="openOutreachComposer(${contactId}, 'connection_request', ${jobId || 'null'})">Connect Note</button>
+          </div>
         </div>
         <label style="font-size: 12px; font-weight: 600;">Subject</label>
-        <input type="text" id="outreachSubject" class="refinement-text-input" value="${escapeHtml(data.draft.subject)}" />
-        <label style="font-size: 12px; font-weight: 600;">Body (Grounded in Verified Profile)</label>
-        <textarea id="outreachBody" rows="10" style="width: 100%; background: var(--bg); color: var(--text-main); border: 1px solid var(--border); border-radius: 6px; padding: 10px; font-size: 13px;">${escapeHtml(data.draft.body)}</textarea>
-        <div style="display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap;">
-          <button class="btn btn-outline btn-sm" onclick="closeModal()">Keep as Draft</button>
-          <button class="btn btn-primary btn-sm" onclick="approveOutreach(${contactId})">Approve &amp; Mark Ready to Send</button>
+        <input type="text" id="outreachSubject" class="refinement-text-input" value="${escapeHtml(d.subject || '')}" />
+        <label style="font-size: 12px; font-weight: 600;">Body (Truthfully Grounded in Candidate Profile)</label>
+        <textarea id="outreachBody" rows="9" style="width: 100%; background: var(--bg); color: var(--text-main); border: 1px solid var(--border); border-radius: 6px; padding: 10px; font-size: 13px;">${escapeHtml(d.body || '')}</textarea>
+        <div style="display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap;">
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            <button class="btn btn-outline btn-sm" onclick="navigator.clipboard.writeText(document.getElementById('outreachSubject').value); showToast?.('Subject copied', 'success')">Copy Subject</button>
+            <button class="btn btn-outline btn-sm" onclick="navigator.clipboard.writeText(document.getElementById('outreachBody').value); showToast?.('Message copied', 'success')">Copy Body</button>
+            ${mailtoHref ? `<a href="${escapeHtml(mailtoHref)}" class="btn btn-outline btn-sm">Open Mail Client ↗</a>` : ''}
+          </div>
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            <button class="btn btn-outline btn-sm" onclick="closeModal()">Keep as Draft</button>
+            <button class="btn btn-primary btn-sm" onclick="markContactedFromComposer(${contactId})">Mark as Contacted</button>
+          </div>
         </div>
       </div>
     `;
   } catch (err) {
     document.getElementById('modalBody').innerHTML = `<div style="color: #f87171;">${escapeHtml(err.message)}</div>`;
   }
+};
+
+window.markContactedFromComposer = async function (contactId) {
+  await fetch(`/api/recruiter-hub/contacts/${contactId}/outreach-status`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status: 'Sent', userApproved: true, notes: 'Marked contacted manually by user' })
+  });
+  closeModal();
+  if (typeof showToast === 'function') showToast('Marked as Contacted!', 'success');
+  if (currentWorkspaceView === 'contacts') loadAndRenderContactsView();
 };
 
 window.approveOutreach = async function (contactId) {
@@ -6329,7 +6599,518 @@ window.updateOutreachStatusFromHub = async function (contactId, status) {
   if (typeof showToast === 'function') showToast(`Updated outreach status to ${status}`, 'info');
 };
 
+// Preset Navigation Helpers (International / Remote / Saved Jobs)
+window.openJobsPresetRegion = function (region) {
+  switchWorkspaceView('jobs');
+  document.querySelectorAll('.region-tab-btn').forEach(b => b.classList.toggle('active', b.dataset.region === region));
+  if (window.unifiedSearchState) {
+    window.unifiedSearchState.locationRegion = region;
+    window.unifiedSearchState.locations = new Set(['all']);
+    const locSel = document.getElementById('locationFilterSelect');
+    if (locSel) locSel.value = 'all';
+  }
+  document.getElementById('secondaryNavDropdown')?.removeAttribute('open');
+  performUnifiedSearch();
+};
+
+window.openJobsPresetStatus = function (statusFilter) {
+  switchWorkspaceView('jobs');
+  currentFilter = statusFilter;
+  document.querySelectorAll('.filter-tab').forEach(t => t.classList.toggle('active', t.dataset.filter === statusFilter));
+  if (window.unifiedSearchState) {
+    window.unifiedSearchState.currentFilter = statusFilter;
+  }
+  document.getElementById('secondaryNavDropdown')?.removeAttribute('open');
+  performUnifiedSearch();
+};
+
+// Clean Overview Dashboard View (Phase 17: Real SQLite Metrics + Search Session + Source Health)
+window.loadAndRenderDashboardView = async function () {
+  const container = document.getElementById('dashboardOverviewBody');
+  if (!container) return;
+  container.innerHTML = `<div style="padding: 24px; text-align: center; color: var(--text-muted);">Loading CareerOS overview...</div>`;
+
+  try {
+    const [statsRes, appsRes, healthRes] = await Promise.all([
+      fetch('/api/stats').then(r => r.json()).catch(() => ({})),
+      fetch('/api/applications').then(r => r.json()).catch(() => ({ applications: [] })),
+      fetch('/api/sources/health').then(r => r.json()).catch(() => ({ sources: [] }))
+    ]);
+    const apps = appsRes.applications || [];
+    const sources = healthRes.sources || [];
+    const submittedCount = apps.filter(a => ['submitted', 'applied', 'user_submitted'].includes(a.status)).length;
+    const interviewsCount = apps.filter(a => a.status === 'interview').length;
+    const liveSourcesCount = sources.filter(s => s.supportsDirectIngestion && s.enabled).length;
+
+    container.innerHTML = `
+      <div class="batch-validation-grid" style="grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 20px;">
+        <div class="batch-stat-box"><strong>${statsRes.totalScanned || 0}</strong><span>New &amp; Relevant Jobs</span></div>
+        <div class="batch-stat-box stat-ready"><strong>${statsRes.recommended || 0}</strong><span>Strong Matches</span></div>
+        <div class="batch-stat-box"><strong>${statsRes.saved || 0}</strong><span>Saved Jobs</span></div>
+        <div class="batch-stat-box stat-ready"><strong>${submittedCount}</strong><span>Submitted Applications</span></div>
+        <div class="batch-stat-box"><strong>${interviewsCount}</strong><span>Interview Opportunities</span></div>
+      </div>
+
+      <div style="background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 18px;">
+        <div style="font-size: 13px; font-weight: 700; margin-bottom: 8px;">Daily Search Session</div>
+        <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">
+          Search Jobs &rarr; Results &rarr; Apply &rarr; Generate ATS Resume &rarr; Find HR &rarr; Submitted
+        </div>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+          <button class="btn btn-primary btn-sm" onclick="switchWorkspaceView('jobs')">Search Jobs</button>
+          <button class="btn btn-outline btn-sm" onclick="openImportJobsModal()">Import Jobs</button>
+          <button class="btn btn-outline btn-sm" onclick="switchWorkspaceView('applications')">Applied (${submittedCount})</button>
+          <button class="btn btn-outline btn-sm" onclick="switchWorkspaceView('contacts')">HR &amp; Referrals</button>
+        </div>
+      </div>
+
+      <div style="background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 10px;">
+          <strong style="font-size: 13px;">Source Health (${liveSourcesCount} Live Feeds/ATS)</strong>
+          <button class="btn btn-outline btn-sm" onclick="loadAndRenderDashboardView()">Refresh</button>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 8px; font-size: 12px;">
+          ${sources.slice(0, 12).map(s => `
+            <div style="padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; display:flex; justify-content:space-between; align-items:center;">
+              <span><strong>${escapeHtml(s.sourceName)}</strong><br><small style="color:var(--text-muted);">${escapeHtml(s.integrationType)}</small></span>
+              <span class="verif-chip ${s.lastError ? 'verif-expired' : (s.supportsDirectIngestion ? 'verif-verified_active' : 'verif-unverified')}">${s.lastError ? 'Error' : (s.supportsDirectIngestion ? `${s.jobsRetrieved || 0} jobs` : 'Assisted')}</span>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  } catch (err) {
+    container.innerHTML = `<div style="color: #f87171;">Failed to load dashboard overview: ${escapeHtml(err.message)}</div>`;
+  }
+};
+
+// Phase 17: Manual Submitted Button Handler
+window.markJobSubmittedManually = async function (jobId) {
+  if (!confirm('Mark this job as manually Submitted? It will move to Applied and be hidden from new unapplied jobs.')) {
+    return;
+  }
+  try {
+    const resp = await fetch(`/api/job/${jobId}/application/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        status: 'submitted',
+        userConfirmed: true,
+        notes: 'Manually submitted by user via Find Jobs'
+      })
+    });
+    const data = await resp.json();
+    if (!resp.ok || data.error) {
+      throw new Error(data.error || 'Failed to mark submitted');
+    }
+    await fetch('/api/job/status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jobId, newStatus: 'applied' })
+    });
+    if (typeof showToast === 'function') {
+      showToast(`Marked Job #${jobId} as Submitted and moved to Applied.`, 'success');
+    }
+    if (typeof loadStats === 'function') loadStats();
+    performUnifiedSearch();
+  } catch (err) {
+    if (typeof showToast === 'function') {
+      showToast(`Error marking submitted: ${err.message}`, 'error');
+    }
+  }
+};
+
+window.undoSubmittedManually = async function (jobId) {
+  if (!confirm('Undo Submitted status for this job and return it to Find Jobs?')) return;
+  try {
+    const resp = await fetch(`/api/job/${jobId}/application/undo`, { method: 'POST' });
+    const data = await resp.json();
+    if (!resp.ok || data.error) throw new Error(data.error || 'Failed to undo');
+    if (typeof showToast === 'function') showToast(`Reverted Job #${jobId} back to Find Jobs.`, 'info');
+    if (typeof loadStats === 'function') loadStats();
+    performUnifiedSearch();
+  } catch (err) {
+    if (typeof showToast === 'function') showToast(`Undo failed: ${err.message}`, 'error');
+  }
+};
+
+// Phase 17: Import Jobs Modal & Batch Preview/Import
+window.openImportJobsModal = function () {
+  const modal = document.getElementById('importJobsModal');
+  if (modal) {
+    modal.classList.remove('hidden');
+    const rep = document.getElementById('importBatchReport');
+    if (rep) rep.classList.add('hidden');
+  }
+};
+
+window.closeImportJobsModal = function () {
+  const modal = document.getElementById('importJobsModal');
+  if (modal) modal.classList.add('hidden');
+};
+
+window.runBatchJobImport = async function (preview = true) {
+  const urlsText = document.getElementById('importBatchUrlsInput')?.value || '';
+  const rawStructured = (document.getElementById('importStructuredInput')?.value || '').trim();
+  const reportEl = document.getElementById('importBatchReport');
+  if (!urlsText.trim() && !rawStructured) {
+    if (typeof showToast === 'function') showToast('Paste at least one URL, JSON, or CSV to import.', 'warning');
+    return;
+  }
+
+  const payload = { urlsText, preview: Boolean(preview) };
+  if (rawStructured) {
+    if (rawStructured.startsWith('[') || rawStructured.startsWith('{')) {
+      payload.jsonText = rawStructured;
+    } else {
+      payload.csvText = rawStructured;
+    }
+  }
+
+  if (reportEl) {
+    reportEl.classList.remove('hidden');
+    reportEl.innerHTML = 'Processing import...';
+  }
+
+  try {
+    const resp = await fetch('/api/jobs/import-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await resp.json();
+    if (!resp.ok || data.error) throw new Error(data.error || 'Import failed');
+
+    const unsupportedHtml = (data.unsupportedExtraction || []).length > 0
+      ? `<div style="margin-top:8px; color:#f59e0b;"><strong>Unsupported Extraction:</strong><ul style="margin:4px 0 0 18px;">${data.unsupportedExtraction.map(u => `<li>${escapeHtml(u.source)}: ${escapeHtml(u.reason)}</li>`).join('')}</ul></div>`
+      : '';
+    const invalidHtml = (data.invalidLinks || []).length > 0
+      ? `<div style="margin-top:8px; color:#f87171;"><strong>Invalid Links (${data.invalidLinks.length}):</strong> ${data.invalidLinks.map(i => escapeHtml(i.url)).join(', ')}</div>`
+      : '';
+
+    if (reportEl) {
+      window.__importPreviewItems = Array.isArray(data.items) ? data.items : [];
+      const selectableListHtml = (data.preview && window.__importPreviewItems.length > 0)
+        ? `<div style="margin-top:10px; max-height:220px; overflow-y:auto; border:1px solid var(--border); border-radius:6px; padding:8px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+              <strong>Select jobs to import (${window.__importPreviewItems.filter(i => i.action !== 'duplicate').length} new):</strong>
+              <button type="button" class="btn btn-primary btn-sm" onclick="importSelectedPreviewJobs()">Import Selected</button>
+            </div>
+            ${window.__importPreviewItems.map((item, idx) => `
+              <label style="display:flex; align-items:center; gap:8px; padding:6px 0; font-size:12px; border-bottom:1px solid rgba(148,163,184,0.12);">
+                <input type="checkbox" class="import-preview-chk" data-idx="${idx}" ${item.action === 'duplicate' ? 'disabled' : 'checked'} />
+                <span style="flex:1;">
+                  <strong>${escapeHtml(item.title)}</strong> &middot; ${escapeHtml(item.company)} <small style="color:var(--text-muted);">(${escapeHtml(item.location || '')})</small><br>
+                  <small style="color:var(--text-muted);">Source: ${escapeHtml(item.source || 'other')} &middot; Match: ${item.matchScore ?? '-'}/100 &middot; Quality: ${escapeHtml(item.dataQuality || 'partial')} &middot; JD: ${item.hasDescription ? 'Yes' : 'No'}</small>
+                </span>
+                <span class="verif-chip ${item.action === 'duplicate' ? 'verif-unverified' : 'verif-verified_active'}">${item.action === 'duplicate' ? 'Duplicate' : 'New'}</span>
+              </label>
+            `).join('')}
+          </div>`
+        : '';
+
+      reportEl.innerHTML = `
+        <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:6px;">
+          <span><strong>Mode:</strong> ${data.preview ? 'Preview (Not Saved)' : 'Saved'}</span>
+          <span><strong>Discovered:</strong> ${data.discovered}</span>
+          <span style="color:#10b981;"><strong>${data.preview ? 'Ready to Import' : 'Imported'}:</strong> ${data.imported}</span>
+          <span><strong>Duplicates:</strong> ${data.duplicates}</span>
+          <span><strong>Invalid:</strong> ${(data.invalidLinks || []).length}</span>
+          <span><strong>Unsupported:</strong> ${(data.unsupportedExtraction || []).length}</span>
+        </div>
+        <div style="font-size:12px; color:var(--text-muted);"><strong>Sources:</strong> ${escapeHtml(JSON.stringify(data.sourceBreakdown || {}))}</div>
+        ${selectableListHtml}
+        ${unsupportedHtml}
+        ${invalidHtml}
+      `;
+    }
+
+    if (!data.preview && data.imported > 0) {
+      if (typeof showToast === 'function') showToast(`Imported ${data.imported} new job(s).`, 'success');
+      if (typeof loadStats === 'function') loadStats();
+      performUnifiedSearch();
+    }
+  } catch (err) {
+    if (reportEl) reportEl.innerHTML = `<span style="color:#f87171;">Import error: ${escapeHtml(err.message)}</span>`;
+  }
+};
+
+window.importSelectedPreviewJobs = async function () {
+  const all = window.__importPreviewItems || [];
+  const selected = [];
+  document.querySelectorAll('.import-preview-chk:checked').forEach(chk => {
+    const idx = Number(chk.getAttribute('data-idx'));
+    if (all[idx]) selected.push(all[idx]);
+  });
+  if (selected.length === 0) {
+    if (typeof showToast === 'function') showToast('Select at least one job to import.', 'warning');
+    return;
+  }
+  const resp = await fetch('/api/jobs/import-batch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items: selected, preview: false })
+  });
+  const data = await resp.json();
+  if (data.success) {
+    if (typeof showToast === 'function') showToast(`Imported ${data.imported} selected job(s) (${data.duplicates} duplicate(s)).`, 'success');
+    closeImportJobsModal();
+    if (typeof loadStats === 'function') loadStats();
+    performUnifiedSearch();
+  }
+};
 
 
 
 
+
+
+
+// ==========================================================================
+// PHASE 15: AI AGENT TASKS, APPROVAL CENTER & UNIFIED TIMELINE
+// ==========================================================================
+
+window.applyWithAi = async function (jobId) {
+  try {
+    const res = await fetch('/api/agent/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jobId, taskType: 'apply_with_ai' })
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || 'Failed to create Apply with AI task');
+    if (data.duplicatePrevented) {
+      showToast(`Active AI task #${data.task.id} already exists for this job (${data.task.status}).`, 'info');
+    } else {
+      showToast(`Apply with AI task #${data.task.id} queued for Antigravity.`, 'success');
+    }
+    switchWorkspaceView('agent-tasks');
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+};
+
+window.loadAndRenderAgentTasksView = async function () {
+  const approvalContainer = document.getElementById('approvalCenterContainer');
+  const tasksContainer = document.getElementById('agentTasksContainer');
+  const statusFilter = document.getElementById('agentTaskStatusFilter')?.value || '';
+
+  try {
+    const [approvalsRes, tasksRes, statusRes] = await Promise.all([
+      fetch('/api/approvals?status=pending').then(r => r.json()),
+      fetch(`/api/agent/tasks${statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : ''}`).then(r => r.json()),
+      fetch('/api/agent/status').then(r => r.json()).catch(() => ({}))
+    ]);
+
+    const statusBanner = document.getElementById('agentBridgeStatusBanner');
+    if (statusBanner && statusRes.success) {
+      const b = statusRes.bridge || {};
+      const c = statusRes.chrome || {};
+      statusBanner.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;font-size:13px;">
+          <div>
+            <strong>Antigravity MCP Bridge:</strong>
+            <span class="task-status-badge ${b.connected ? 'status-completed' : 'status-needs_manual_action'}">${b.connected ? 'Connected' : 'Offline / Waiting for Agent'}</span>
+            ${b.lastSeenAt ? `<span class="subtext" style="margin-left:6px;">Last tool: ${escapeHtml(b.lastTool || 'mcp')} (${b.ageSeconds}s ago)</span>` : '<span class="subtext" style="margin-left:6px;">Start Antigravity to process queued tasks via MCP.</span>'}
+          </div>
+          <div>
+            <strong>Chrome Profile:</strong>
+            <span class="task-status-badge ${c.cdpConnected ? 'status-completed' : 'status-running'}">${escapeHtml(c.profileLabel || c.profileDirectory || 'Profile 21')}</span>
+            <span class="subtext" style="margin-left:6px;">${c.cdpConnected ? 'CDP Live Attached (127.0.0.1:9222)' : 'Profile Ready (Run scripts/launchChromeWorkProfile.ps1 for live CDP)'}</span>
+          </div>
+        </div>
+      `;
+    }
+
+    const approvals = approvalsRes.approvals || [];
+    const tasks = tasksRes.tasks || [];
+
+    const badge = document.getElementById('navAgentTasksBadge');
+    if (badge) {
+      const attentionCount = approvals.length + tasks.filter(t => ['awaiting_approval', 'needs_manual_action', 'running', 'queued'].includes(t.status)).length;
+      badge.textContent = String(attentionCount);
+    }
+
+    if (approvalContainer) {
+      if (approvals.length === 0) {
+        approvalContainer.innerHTML = '<p class="subtext">No pending approvals. All sensitive actions require explicit approval here.</p>';
+      } else {
+        approvalContainer.innerHTML = approvals.map(a => `
+          <div class="approval-card" data-approval-id="${a.id}">
+            <div class="approval-card-header">
+              <strong>${escapeHtml(a.actionType)} — ${escapeHtml(a.subjectOrTitle || 'Action Review')}</strong>
+              <span class="task-status-badge status-awaiting_approval">Pending Approval</span>
+            </div>
+            <div class="approval-meta">
+              <span><strong>Destination:</strong> ${escapeHtml(a.recipientOrDestination || 'N/A')}</span>
+              ${a.jobId ? `<span><strong>Job #${a.jobId}</strong></span>` : ''}
+            </div>
+            ${a.attachedDocuments && a.attachedDocuments.length > 0 ? `
+              <div class="approval-docs"><strong>Attachments:</strong> ${a.attachedDocuments.map(d => escapeHtml(typeof d === 'string' ? d : (d.label || d.path || 'File'))).join(', ')}</div>
+            ` : ''}
+            ${a.exactContent ? `<pre class="approval-content-preview">${escapeHtml(a.exactContent)}</pre>` : ''}
+            <div class="approval-warning">⚠️ ${escapeHtml(a.riskWarning || 'Explicit confirmation required.')}</div>
+            <div class="approval-actions">
+              <button class="btn btn-primary btn-sm" onclick="decideApprovalItem(${a.id}, 'approved')">Approve</button>
+              <button class="btn btn-outline btn-sm" onclick="editAndApproveItem(${a.id})">Edit &amp; Approve</button>
+              <button class="btn btn-outline btn-sm" onclick="decideApprovalItem(${a.id}, 'rejected')">Reject</button>
+            </div>
+          </div>
+        `).join('');
+      }
+    }
+
+    if (tasksContainer) {
+      if (tasks.length === 0) {
+        tasksContainer.innerHTML = '<p class="subtext">No AI Agent tasks yet. Click <strong>Apply with AI</strong> on any job card to queue one.</p>';
+      } else {
+        tasksContainer.innerHTML = tasks.map(t => `
+          <div class="agent-task-card">
+            <div class="agent-task-header">
+              <div>
+                <strong>#${t.id} ${escapeHtml(t.title)} @ ${escapeHtml(t.company)}</strong>
+                <div class="subtext" style="font-size:12px;">${escapeHtml(t.taskUid)} • ${escapeHtml(t.taskType)}${t.currentStep ? ` • Step: ${escapeHtml(t.currentStep)}` : ''}${t.browserStatus ? ` • Browser: ${escapeHtml(t.browserStatus)}` : ''}</div>
+                <div class="subtext" style="font-size:11px;">Created: ${escapeHtml(t.createdAt || '')}${t.startedAt ? ` • Started: ${escapeHtml(t.startedAt)}` : ''}${t.completedAt ? ` • Completed: ${escapeHtml(t.completedAt)}` : ''}</div>
+              </div>
+              <span class="task-status-badge status-${escapeHtml(t.status)}">${escapeHtml(t.status)}</span>
+            </div>
+            ${t.artifacts && t.artifacts.length > 0 ? `<div class="subtext" style="font-size:12px;margin-bottom:4px;"><strong>Files:</strong> ${t.artifacts.map(a => escapeHtml(a.label || a.path || 'Artifact')).join(', ')}</div>` : ''}
+            ${t.manualActionRequired ? `<div class="approval-warning">🛑 Manual Action Required: ${escapeHtml(t.manualActionRequired)}</div>` : ''}
+            ${t.errorDetails ? `<div class="approval-warning">❌ Error: ${escapeHtml(t.errorDetails)}</div>` : ''}
+            ${t.resultSummary ? `<div class="task-result-box"><strong>Result:</strong> ${escapeHtml(t.resultSummary)}</div>` : ''}
+            <div class="task-progress-list">
+              ${(t.progressEvents || []).slice(-3).map(ev => `<div class="subtext" style="font-size:12px;">• [${escapeHtml(ev.status)}] ${escapeHtml(ev.message)}</div>`).join('')}
+            </div>
+            <div class="approval-actions" style="margin-top:8px;">
+              ${['queued', 'running', 'paused', 'needs_manual_action', 'agent_disconnected', 'browser_connection_required', 'waiting_for_user'].includes(t.status) ? `
+                ${t.status === 'running'
+              ? `<button class="btn btn-outline btn-sm" onclick="controlAgentTask(${t.id}, 'pause')">Pause</button>`
+              : `<button class="btn btn-outline btn-sm" onclick="controlAgentTask(${t.id}, 'resume')">Resume</button>`}
+                <button class="btn btn-outline btn-sm" onclick="controlAgentTask(${t.id}, 'cancel')">Cancel</button>
+              ` : ''}
+              ${['failed', 'agent_disconnected', 'browser_connection_required', 'paused'].includes(t.status)
+            ? `<button class="btn btn-primary btn-sm" onclick="controlAgentTask(${t.id}, 'retry')">Retry</button>`
+            : ''}
+              <button class="btn btn-outline btn-sm" onclick="openJobTimelineModal(${t.jobId})">View Timeline</button>
+            </div>
+          </div>
+        `).join('');
+      }
+    }
+  } catch (err) {
+    if (tasksContainer) tasksContainer.innerHTML = `<p class="subtext">Error loading agent tasks: ${escapeHtml(err.message)}</p>`;
+  }
+};
+
+window.controlAgentTask = async function (taskId, action) {
+  try {
+    const res = await fetch(`/api/agent/tasks/${taskId}/${action}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || `Failed to ${action} task`);
+    showToast(`Task #${taskId} updated (${data.task.status}).`, 'success');
+    loadAndRenderAgentTasksView();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+};
+
+window.decideApprovalItem = async function (approvalId, decision, editedContent = null) {
+  try {
+    const res = await fetch(`/api/approvals/${approvalId}/decide`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        decision,
+        editedContent,
+        userConfirmed: decision === 'approved'
+      })
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || 'Approval decision failed');
+    showToast(`Approval #${approvalId} marked ${decision}.`, 'success');
+    loadAndRenderAgentTasksView();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+};
+
+window.editAndApproveItem = async function (approvalId) {
+  const card = document.querySelector(`[data-approval-id="${approvalId}"] .approval-content-preview`);
+  const current = card ? card.textContent : '';
+  const edited = window.prompt('Edit exact content before approving:', current);
+  if (edited === null) return;
+  await decideApprovalItem(approvalId, 'approved', edited);
+};
+
+window.openJobTimelineModal = async function (jobId) {
+  try {
+    const res = await fetch(`/api/timeline/${jobId}`);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || 'Failed to load timeline');
+    const summary = (data.events || []).map(ev => `• ${ev.occurredAt || ''} — ${ev.title}${ev.details ? ` (${ev.details})` : ''}`).join('\n');
+    window.alert(`Timeline for ${data.title} @ ${data.company}\n\n${summary || 'No events recorded yet.'}`);
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+};
+
+
+// ==========================================================================
+// CHROME PROFILE CONNECTION SETTINGS
+// ==========================================================================
+window.loadChromeProfileSettings = async function () {
+  const sel = document.getElementById('chromeProfileSelect');
+  const chk = document.getElementById('chkUseChromeProfile');
+  const statusEl = document.getElementById('chromeProfileStatusText');
+  if (!sel) return;
+  try {
+    const res = await fetch('/api/chrome/profiles');
+    const data = await res.json();
+    if (!data.success) return;
+    const { config, profiles } = data;
+    if (chk) chk.checked = Boolean(config.enabled);
+    sel.innerHTML = (profiles || []).map(p => {
+      const label = `${p.name}${p.userName ? ` (${p.userName})` : ''} [${p.directory}]`;
+      const selected = p.directory === config.profileDirectory ? 'selected' : '';
+      return `<option value="${escapeHtml(p.directory)}" ${selected}>${escapeHtml(label)}</option>`;
+    }).join('') || `<option value="${escapeHtml(config.profileDirectory)}">${escapeHtml(config.profileLabel)}</option>`;
+    if (statusEl) {
+      statusEl.textContent = config.enabled
+        ? `Connected to ${config.profileLabel} (${config.profileDirectory})`
+        : 'Chrome profile reuse disabled (opens fresh temporary browser)';
+    }
+  } catch {
+    // Non-blocking
+  }
+};
+
+window.saveChromeProfileSelection = async function () {
+  const sel = document.getElementById('chromeProfileSelect');
+  const chk = document.getElementById('chkUseChromeProfile');
+  if (!sel) return;
+  try {
+    const res = await fetch('/api/chrome/profile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        enabled: chk ? chk.checked : true,
+        profileDirectory: sel.value,
+        profileLabel: sel.options[sel.selectedIndex]?.textContent || sel.value
+      })
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || 'Failed to save Chrome profile');
+    showToast(`Connected Chrome profile: ${data.config.profileLabel}`, 'success');
+    loadChromeProfileSettings();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+};
+
+document.addEventListener('DOMContentLoaded', () => {
+  loadChromeProfileSettings();
+});

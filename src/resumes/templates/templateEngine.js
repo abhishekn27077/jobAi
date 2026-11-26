@@ -35,10 +35,15 @@ export function renderResumeMarkdown(data) {
   const edu = data.education || [];
   const certs = data.certificationsAndAwards || [];
 
+  const linksLine = [
+    p.linkedIn ? `**LinkedIn:** [${p.linkedIn}](${p.linkedIn})` : '',
+    p.gitHub ? `**GitHub:** [${p.gitHub}](${p.gitHub})` : '',
+    (p.portfolio && !p.portfolio.toLowerCase().includes('nearvia.app')) ? `**Portfolio:** [${p.portfolio}](${p.portfolio})` : ''
+  ].filter(Boolean).join(' | ');
   let md = `# ${p.fullName || 'Abhishek N'}\n`;
   md += `**Location:** ${p.location || 'Bangalore, India'} | **Phone:** ${p.phone || ''} | **Email:** ${p.email || ''}\n`;
-  md += `**LinkedIn:** [${p.linkedIn}](${p.linkedIn}) | **GitHub:** [${p.gitHub}](${p.gitHub}) | **Portfolio:** [${p.portfolio}](${p.portfolio})\n\n`;
-  md += `---\n\n`;
+  if (linksLine) md += `${linksLine}\n`;
+  md += `\n---\n\n`;
 
   md += `## PROFESSIONAL SUMMARY\n${s}\n\n`;
   md += `---\n\n`;
@@ -99,7 +104,7 @@ function renderAtsProfessionalHtml(p, s, skills, exp, projects, edu, certs) {
   const linkParts = [
     p.linkedIn ? `<a href="${escapeXml(p.linkedIn)}">${escapeXml(cleanUrlLabel(p.linkedIn))}</a>` : '',
     p.gitHub ? `<a href="${escapeXml(p.gitHub)}">${escapeXml(cleanUrlLabel(p.gitHub))}</a>` : '',
-    p.portfolio ? `<a href="${escapeXml(p.portfolio)}">${escapeXml(cleanUrlLabel(p.portfolio))}</a>` : ''
+    (p.portfolio && !p.portfolio.toLowerCase().includes('nearvia.app')) ? `<a href="${escapeXml(p.portfolio)}">${escapeXml(cleanUrlLabel(p.portfolio))}</a>` : ''
   ].filter(Boolean);
 
   return `<!DOCTYPE html>
@@ -118,24 +123,24 @@ function renderAtsProfessionalHtml(p, s, skills, exp, projects, edu, certs) {
     font-family: "Calibri", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
     color: #111827;
     background: #ffffff;
-    line-height: 1.42;
-    font-size: 10pt;
+    line-height: 1.32;
+    font-size: 9.5pt;
     margin: 0;
     padding: 0;
   }
   .header {
     text-align: center;
     border-bottom: 1.5px solid #111827;
-    padding-bottom: 9px;
-    margin-bottom: 12px;
+    padding-bottom: 6px;
+    margin-bottom: 8px;
   }
   h1 {
-    font-size: 19pt;
+    font-size: 17pt;
     font-weight: 700;
     color: #0f172a;
     text-transform: uppercase;
     letter-spacing: 0.8px;
-    margin: 0 0 5px 0;
+    margin: 0 0 3px 0;
   }
   .contact-line {
     font-size: 9.2pt;
@@ -148,41 +153,41 @@ function renderAtsProfessionalHtml(p, s, skills, exp, projects, edu, certs) {
     border-bottom: 1px dotted #9ca3af;
   }
   section {
-    margin-bottom: 10px;
+    margin-bottom: 7px;
   }
   h2 {
-    font-size: 10.5pt;
+    font-size: 10pt;
     font-weight: 700;
     color: #0f172a;
     text-transform: uppercase;
     letter-spacing: 0.7px;
     border-bottom: 1px solid #9ca3af;
-    margin: 12px 0 6px 0;
+    margin: 8px 0 4px 0;
     padding-bottom: 2px;
     break-after: avoid;
     page-break-after: avoid;
   }
   .summary-text {
-    margin: 0 0 6px 0;
-    font-size: 9.8pt;
+    margin: 0 0 4px 0;
+    font-size: 9.4pt;
     color: #1f2937;
     text-align: left;
   }
   .skills-list {
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 2px;
   }
   .skills-row {
-    font-size: 9.6pt;
-    line-height: 1.38;
+    font-size: 9.2pt;
+    line-height: 1.32;
   }
   .skills-row strong {
     color: #0f172a;
     font-weight: 700;
   }
   .entry {
-    margin-bottom: 8px;
+    margin-bottom: 5px;
     break-inside: avoid;
     page-break-inside: avoid;
   }
@@ -214,13 +219,13 @@ function renderAtsProfessionalHtml(p, s, skills, exp, projects, edu, certs) {
     text-decoration: none;
   }
   ul {
-    margin: 3px 0 4px 16px;
+    margin: 2px 0 3px 16px;
     padding: 0;
   }
   li {
-    margin-bottom: 2.5px;
-    font-size: 9.6pt;
-    line-height: 1.4;
+    margin-bottom: 1.5px;
+    font-size: 9.3pt;
+    line-height: 1.3;
     color: #1f2937;
   }
 </style>
@@ -418,8 +423,7 @@ function renderModernProfessionalHtml(p, s, skills, exp, projects, edu, certs) {
     <div class="contact-line">
       ${escapeXml(p.location)} | ${escapeXml(p.phone)} | ${escapeXml(p.email)} |
       <a href="${p.linkedIn}">LinkedIn</a> |
-      <a href="${p.gitHub}">GitHub</a> |
-      <a href="${p.portfolio}">Portfolio</a>
+      <a href="${p.gitHub}">GitHub</a>${(p.portfolio && !p.portfolio.toLowerCase().includes('nearvia.app')) ? ` | <a href="${escapeXml(p.portfolio)}">Portfolio</a>` : ''}
     </div>
   </div>
 
@@ -563,8 +567,7 @@ function renderCompactOnePageHtml(p, s, skills, exp, projects, edu, certs) {
     <div class="contact-line">
       ${escapeXml(p.location)} | ${escapeXml(p.phone)} | ${escapeXml(p.email)} |
       <a href="${p.linkedIn}">LinkedIn</a> |
-      <a href="${p.gitHub}">GitHub</a> |
-      <a href="${p.portfolio}">Portfolio</a>
+      <a href="${p.gitHub}">GitHub</a>${(p.portfolio && !p.portfolio.toLowerCase().includes('nearvia.app')) ? ` | <a href="${escapeXml(p.portfolio)}">Portfolio</a>` : ''}
     </div>
   </div>
 

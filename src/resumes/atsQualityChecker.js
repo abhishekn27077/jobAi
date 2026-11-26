@@ -62,9 +62,22 @@ export function checkResumeAtsQuality(resumeContent, job, options = {}) {
     checks.push({ id: '1_contact_details', name: 'Contact Details Integrity', status: 'failed', score: 0, max: 10, details: `Missing: ${missing.join(', ')}` });
   }
 
-  // 2. Online Profiles & Technical Footprint (GitHub & LinkedIn)
+  // 2. Online Profiles & Technical Footprint (GitHub & LinkedIn, and no incorrect nearvia.app portfolio)
   const hasGithub = /github\.com\/[a-z0-9_-]+/i.test(resumeFullText);
   const hasLinkedIn = /linkedin\.com\/in\/[a-z0-9_-]+/i.test(resumeFullText);
+  const hasIncorrectPortfolio = Boolean(content.personal?.portfolio && /nearvia\.app/i.test(content.personal.portfolio)) ||
+    /portfolio[^\n|]*nearvia\.app/i.test(resumeFullText);
+
+  if (hasIncorrectPortfolio) {
+    overallScore -= 10;
+    findings.push('nearvia.app is listed as personal portfolio; it is a project URL, not a personal portfolio.');
+  }
+
+  const aiAwardMatches = (resumeFullText.match(/best ai innovation/gi) || []).length;
+  if (aiAwardMatches > 1) {
+    overallScore -= 5;
+    warnings.push(`Best AI Innovation award is repeated ${aiAwardMatches} times; keep it once under Achievements.`);
+  }
 
   if (hasGithub && hasLinkedIn) {
     checks.push({ id: '2_online_profiles', name: 'Technical Profiles (GitHub & LinkedIn)', status: 'passed', score: 5, max: 5, details: 'Valid GitHub and LinkedIn URLs provided.' });

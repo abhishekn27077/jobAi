@@ -551,7 +551,138 @@ function initSchema(db) {
       CREATE INDEX IF NOT EXISTS idx_batch_items_job ON batch_session_items(job_id);
       CREATE INDEX IF NOT EXISTS idx_recruiter_contacts_company ON recruiter_contacts(company);
       CREATE INDEX IF NOT EXISTS idx_recruiter_contacts_job ON recruiter_contacts(job_id);
+
+      CREATE TABLE IF NOT EXISTS agent_tasks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_uid TEXT NOT NULL UNIQUE,
+        job_id INTEGER NOT NULL,
+        canonical_url TEXT,
+        company TEXT NOT NULL,
+        title TEXT NOT NULL,
+        task_type TEXT NOT NULL DEFAULT 'apply_with_ai',
+        instructions TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'queued',
+        agent_session_ref TEXT,
+        progress_events_json TEXT DEFAULT '[]',
+        error_details TEXT,
+        manual_action_required TEXT,
+        approval_required INTEGER DEFAULT 0,
+        result_summary TEXT,
+        artifacts_json TEXT DEFAULT '[]',
+        created_at TEXT DEFAULT (datetime('now')),
+        started_at TEXT,
+        updated_at TEXT DEFAULT (datetime('now')),
+        completed_at TEXT,
+        FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS outreach_drafts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_id INTEGER,
+        contact_id INTEGER,
+        task_id INTEGER,
+        channel TEXT NOT NULL DEFAULT 'email',
+        recipient_name TEXT,
+        recipient_email TEXT,
+        subject TEXT,
+        body TEXT NOT NULL,
+        evidence_json TEXT DEFAULT '[]',
+        status TEXT NOT NULL DEFAULT 'draft',
+        gmail_draft_id TEXT,
+        approved_at TEXT,
+        sent_at TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE SET NULL,
+        FOREIGN KEY (contact_id) REFERENCES recruiter_contacts(id) ON DELETE SET NULL,
+        FOREIGN KEY (task_id) REFERENCES agent_tasks(id) ON DELETE SET NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS approval_requests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        action_type TEXT NOT NULL,
+        job_id INTEGER,
+        task_id INTEGER,
+        contact_id INTEGER,
+        draft_id INTEGER,
+        recipient_or_destination TEXT,
+        subject_or_title TEXT,
+        exact_content TEXT,
+        attached_documents_json TEXT DEFAULT '[]',
+        risk_warning TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        decision_note TEXT,
+        decided_at TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE SET NULL,
+        FOREIGN KEY (task_id) REFERENCES agent_tasks(id) ON DELETE SET NULL,
+        FOREIGN KEY (contact_id) REFERENCES recruiter_contacts(id) ON DELETE SET NULL,
+        FOREIGN KEY (draft_id) REFERENCES outreach_drafts(id) ON DELETE SET NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS application_timeline_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_id INTEGER NOT NULL,
+        application_id INTEGER,
+        contact_id INTEGER,
+        task_id INTEGER,
+        thread_id TEXT,
+        event_type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        details TEXT,
+        metadata_json TEXT DEFAULT '{}',
+        occurred_at TEXT DEFAULT (datetime('now')),
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS drive_links (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_id INTEGER,
+        application_id INTEGER,
+        drive_file_id TEXT NOT NULL,
+        file_name TEXT NOT NULL,
+        doc_type TEXT NOT NULL,
+        folder_id TEXT,
+        web_view_link TEXT,
+        local_path TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE SET NULL,
+        FOREIGN KEY (application_id) REFERENCES applications(id) ON DELETE SET NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_agent_tasks_job ON agent_tasks(job_id);
+      CREATE INDEX IF NOT EXISTS idx_agent_tasks_status ON agent_tasks(status);
+      CREATE INDEX IF NOT EXISTS idx_outreach_drafts_job ON outreach_drafts(job_id);
+      CREATE INDEX IF NOT EXISTS idx_outreach_drafts_contact ON outreach_drafts(contact_id);
+      CREATE INDEX IF NOT EXISTS idx_approval_requests_status ON approval_requests(status);
+      CREATE INDEX IF NOT EXISTS idx_timeline_job ON application_timeline_events(job_id);
+      CREATE INDEX IF NOT EXISTS idx_drive_links_job ON drive_links(job_id);
     `);
+
+    const phase15Migrations = [
+      "ALTER TABLE recruiter_contacts ADD COLUMN profile_url TEXT",
+      "ALTER TABLE recruiter_contacts ADD COLUMN public_source_urls_json TEXT DEFAULT '[]'",
+      "ALTER TABLE recruiter_contacts ADD COLUMN research_timestamp TEXT",
+      "ALTER TABLE recruiter_contacts ADD COLUMN evidence_notes TEXT",
+      "ALTER TABLE recruiter_contacts ADD COLUMN notes TEXT",
+      "ALTER TABLE recruiter_contacts ADD COLUMN relevance_score REAL DEFAULT 0",
+      "ALTER TABLE recruiter_contacts ADD COLUMN email_evidence TEXT DEFAULT 'Not found'",
+      "ALTER TABLE recruiter_contacts ADD COLUMN last_contact_date TEXT",
+      "ALTER TABLE recruiter_contacts ADD COLUMN associated_job_ids_json TEXT DEFAULT '[]'",
+      "ALTER TABLE approval_requests ADD COLUMN context_hash TEXT",
+      "ALTER TABLE approval_requests ADD COLUMN expires_at TEXT",
+      "ALTER TABLE agent_tasks ADD COLUMN browser_status TEXT",
+      "ALTER TABLE agent_tasks ADD COLUMN current_step TEXT"
+    ];
+    for (const sql of phase15Migrations) {
+      try {
+        db.exec(sql);
+      } catch {
+        // Column already exists
+      }
+    }
   } catch {
     // Safe fallback
   }

@@ -92,6 +92,16 @@ export function auditDocumentTruthfulness(content, profile) {
     });
   }
 
+  // 6b. Incorrect Portfolio URL Check (nearvia.app is a project, not personal portfolio)
+  if (/portfolio[^\n|]*nearvia\.app/i.test(text)) {
+    flags.push({
+      term: 'nearvia.app as portfolio',
+      category: 'INCORRECT_PORTFOLIO_URL',
+      severity: 'CRITICAL',
+      reason: 'nearvia.app is the NearVia project URL, not a personal portfolio website. Omit portfolio field until provided.'
+    });
+  }
+
   // 7. Claim-level Evidence Mapping
   const claimAudits = [];
   let parsedContent = null;
@@ -118,12 +128,22 @@ export function auditDocumentTruthfulness(content, profile) {
             pLower.includes(mpLower) ||
             mpLower.split(/[\s–—-]+/)[0] === pLower.split(/[\s–—-]+/)[0];
         });
+        const expEvidenceMatch = (profile.experience || []).find(exp =>
+          (exp.bullets || []).some(b => b.toLowerCase().includes(pName.toLowerCase()) || pName.toLowerCase().includes('leave management') && /leave management/i.test(b))
+        );
         if (match) {
           claimAudits.push({
             section: 'projects',
             claim: pName,
             isSupported: true,
             evidence: `Master profile project "${match.name}" (Tech stack: ${(match.techStack || []).join(', ')})`
+          });
+        } else if (expEvidenceMatch) {
+          claimAudits.push({
+            section: 'projects',
+            claim: pName,
+            isSupported: true,
+            evidence: `Verified internship implementation under ${expEvidenceMatch.company}`
           });
         } else {
           claimAudits.push({
@@ -230,51 +250,72 @@ export function generateTailoredResume(job, profile = null) {
   if (!profile) profile = loadCandidateProfile();
 
   const jobDesc = `${job.title} ${job.description || ''}`.toLowerCase();
-  const isJavaFocused = /java|spring|backend/i.test(jobDesc);
-  const isReactFocused = /react|frontend|javascript|typescript/i.test(jobDesc);
-  const isPythonAiFocused = /python|ai|ml|machine\s*learning|vision|fastapi/i.test(jobDesc);
+  const isJavaFocused = /\b(java|j2ee|spring\s*boot|spring|hibernate|jpa)\b/i.test(jobDesc);
+  const isReactFocused = /\b(react|reactjs|react\.js|frontend|javascript|typescript|full[\s-]?stack)\b/i.test(jobDesc);
+  const isPythonAiFocused = /\b(python|fastapi|opencv|computer\s*vision|machine\s*learning|artificial\s*intelligence|ai\/ml|ml\s+engineer|ai\s+engineer|data\s+science)\b/i.test(jobDesc);
 
-  // Tailor Professional Summary (Evidence-grounded, zero unverified claims)
+  // Tailor Professional Summary (Action + Technical Implementation + Purpose, zero fabrication)
   let summary = profile.summary;
   if (isJavaFocused && isReactFocused) {
-    summary = `Java Full Stack Developer with hands-on experience building web applications using Java, Spring Boot, React.js and MySQL/PostgreSQL. Built full-stack applications including NearVia (hyperlocal job marketplace) and an Employee Leave Management System with REST API architecture. MCA graduate (2026) seeking entry-level software development roles.`;
+    summary = `Java Full Stack Developer with hands-on experience building full-stack web applications using Java, Spring Boot, React.js, TypeScript, and SQL databases (MySQL, PostgreSQL). Built NearVia, a location-based hyperlocal job marketplace with PostGIS spatial queries and row-level concurrency control, and implemented an Employee Leave Management System during Java Full Stack internship at Anudip Foundation. MCA graduate (Oct 2026) seeking entry-level software engineering roles.`;
   } else if (isJavaFocused) {
-    summary = `Java Backend Developer with strong foundations in Core Java, OOP, Spring Boot, Hibernate/JPA, and relational databases (MySQL, PostgreSQL). Hands-on experience developing RESTful APIs, transactional leave management applications, and PostGIS location-based query engines. MCA graduate (2026) seeking junior software engineering positions.`;
+    summary = `Java Backend Developer with strong foundations in Core Java, OOP, Spring Boot REST APIs, Hibernate/JPA, and relational databases (MySQL, PostgreSQL). Implemented an Employee Leave Management System using Spring Boot and Hibernate/JPA during internship at Anudip Foundation, and built NearVia with PostgreSQL/PostGIS concurrency control. MCA graduate (Oct 2026) seeking junior software engineer roles.`;
   } else if (isPythonAiFocused) {
-    summary = `Software Engineer with hands-on experience in Python, FastAPI, computer vision (OpenCV), and full-stack development (React, Node.js). Developer of FinSight AI financial predictor and Smart Rover computer-vision vehicle. Recipient of Best AI Innovation medal at MCA graduation.`;
+    summary = `Software Engineer with hands-on experience in Python, FastAPI, computer vision (OpenCV), and full-stack web development. Built FinSight (AI expense & financial health predictor), Smart Rover (OpenCV waste detection), and Drowsiness Detection systems. MCA graduate (Oct 2026) seeking entry-level software engineering roles.`;
   }
 
-  // Reorder projects by relevance
-  const projects = [...profile.projects].sort((a, b) => {
-    let scoreA = 0;
-    let scoreB = 0;
-    if (isJavaFocused) {
-      if (a.name.includes('Leave Management')) scoreA += 10;
-      if (b.name.includes('Leave Management')) scoreB += 10;
-      if (a.name.includes('NearVia')) scoreA += 8;
-      if (b.name.includes('NearVia')) scoreB += 8;
-    }
-    if (isReactFocused) {
-      if (a.name.includes('NearVia')) scoreA += 10;
-      if (b.name.includes('NearVia')) scoreB += 10;
-      if (a.name.includes('FinSight')) scoreA += 8;
-      if (b.name.includes('FinSight')) scoreB += 8;
-    }
-    if (isPythonAiFocused) {
-      if (a.name.includes('FinSight') || a.name.includes('Smart Rover')) scoreA += 10;
-      if (b.name.includes('FinSight') || b.name.includes('Smart Rover')) scoreB += 10;
-    }
-    return scoreB - scoreA;
-  });
+  // Phase 18 Project Priority:
+  // Default: 1. NearVia, 2. FinSight, 3. Aquaponics, 4. Smart Rover, 5. Drowsiness Detection
+  const basePriority = (name = '') => {
+    const n = name.toLowerCase();
+    if (n.includes('nearvia')) return 100;
+    if (n.includes('finsight')) return 80;
+    if (n.includes('aquaponics')) return 60;
+    if (n.includes('smart rover') || n.includes('rover')) return 40;
+    if (n.includes('drowsiness')) return 20;
+    return 0;
+  };
+
+  const projects = [...(profile.projects || [])]
+    .filter(proj => !/leave management|voting/i.test(proj.name || ''))
+    .sort((a, b) => {
+      let scoreA = basePriority(a.name);
+      let scoreB = basePriority(b.name);
+      if (isPythonAiFocused) {
+        if (/finsight|rover|drowsiness/i.test(a.name)) scoreA += 35;
+        if (/finsight|rover|drowsiness/i.test(b.name)) scoreB += 35;
+      }
+      return scoreB - scoreA;
+    });
 
   // Highlight key matching skills
   const skills = profile.skills;
-  const p = profile.personal;
+  const p = { ...profile.personal };
+  if (p.portfolio && p.portfolio.toLowerCase().includes('nearvia.app')) {
+    delete p.portfolio;
+  }
+
+  const contactLinksMd = [
+    p.linkedIn ? `**LinkedIn:** [linkedin.com/in/abhishekn27077](${p.linkedIn})` : '',
+    p.gitHub ? `**GitHub:** [github.com/abhishekn27077](${p.gitHub})` : '',
+    p.portfolio ? `**Portfolio:** [${p.portfolio}](${p.portfolio})` : ''
+  ].filter(Boolean).join(' | ');
+
+  const anudipExp = (profile.experience || []).find(e => /anudip/i.test(e.company || '')) || {
+    role: 'Advanced Java Full Stack Development Intern',
+    company: 'Anudip Foundation, Bangalore',
+    period: 'Oct 2026',
+    bullets: [
+      'Developed Java applications applying Object-Oriented Programming (OOP), JDBC, Collections Framework, and Multithreading.',
+      'Built full-stack web applications using Spring Boot, React.js, MySQL, and REST APIs.',
+      'Implemented an Employee Leave Management System using Java, Spring Boot, Hibernate/JPA, React, and MySQL to handle employee leave requests and status tracking.'
+    ]
+  };
 
   // Generate ATS-optimized Markdown
   const markdown = `# ${p.fullName}
 **Location:** ${p.location} | **Phone:** ${p.phone} | **Email:** ${p.email}  
-**LinkedIn:** [linkedin.com/in/abhishekn27077](${p.linkedIn}) | **GitHub:** [github.com/abhishekn27077](${p.gitHub}) | **Portfolio:** [nearvia.app](${p.portfolio})
+${contactLinksMd}
 
 ---
 
@@ -293,33 +334,29 @@ ${summary}
 
 ---
 
+## INTERNSHIP EXPERIENCE
+- **${anudipExp.role}** | ${anudipExp.period}  
+  *${anudipExp.company}*  
+${(anudipExp.bullets || []).map(b => `  - ${b}`).join('\n')}
+
+---
+
+## PROJECTS
+${projects.slice(0, 3).map(proj => `
+### ${proj.name}
+*Tech Stack: ${proj.techStack.join(', ')}*  
+${proj.url ? `*Website: [${proj.url}](${proj.url})*${proj.github ? ' | ' : ''}` : ''}${proj.github ? `*GitHub: [${proj.github}](${proj.github})*` : ''}
+${proj.bullets.map(b => `- ${b}`).join('\n')}
+`).join('\n')}
+
+---
+
 ## EDUCATION
 - **Master of Computer Applications (MCA)** | 2024 – 2026 (Completed Oct 2026)  
   *AIMS Institutes, Bangalore*  
   *Honors: Received the Best AI Innovation medal at graduation*
 - **Bachelor of Computer Applications (BCA)** | 2021 – 2024  
   *SSA Government First Grade College, Ballari*
-
----
-
-## INTERNSHIPS & PRACTICAL TRAINING
-- **Advanced Java Full Stack Development Intern** | Oct 2026  
-  *Anudip Foundation, Bangalore*  
-  - Developed Java applications applying Object-Oriented Programming (OOP), JDBC, Collections Framework, and Multithreading.
-  - Built full-stack web applications using Spring Boot, React.js, MySQL, and REST APIs.
-- **Digital Media Intern** | Feb 2026  
-  *Association of Women Entrepreneurs of Karnataka (AWAKE), Bangalore*  
-  - Coordinated digital branding campaigns and community awareness initiatives (30-hour internship).
-
----
-
-## PROJECTS
-${projects.slice(0, 4).map(proj => `
-### ${proj.name}
-*Tech Stack: ${proj.techStack.join(', ')}*  
-${proj.url ? `*Website: [${proj.url}](${proj.url})* | ` : ''}${proj.github ? `*GitHub: [${proj.github}](${proj.github})*` : ''}
-${proj.bullets.map(b => `- ${b}`).join('\n')}
-`).join('\n')}
 
 ---
 
@@ -367,8 +404,7 @@ ${proj.bullets.map(b => `- ${b}`).join('\n')}
   <div class="contact">
     ${p.location} | ${p.phone} | ${p.email} |
     <a href="${p.linkedIn}">LinkedIn</a> |
-    <a href="${p.gitHub}">GitHub</a> |
-    <a href="${p.portfolio}">Portfolio (nearvia.app)</a>
+    <a href="${p.gitHub}">GitHub</a>${p.portfolio ? ` | <a href="${p.portfolio}">Portfolio</a>` : ''}
   </div>
 
   <h2>Professional Summary</h2>
@@ -383,28 +419,27 @@ ${proj.bullets.map(b => `- ${b}`).join('\n')}
     <p><strong>AI / ML & Tools:</strong> ${skills.ai_ml.join(', ')}, ${skills.tools.slice(0, 6).join(', ')}</p>
   </div>
 
-  <h2>Education</h2>
-  <h3>Master of Computer Applications (MCA) — AIMS Institutes, Bangalore</h3>
-  <div class="subtitle">2024 – 2026 (Completed Oct 2026) | Recipient of Best AI Innovation Medal</div>
-  <h3>Bachelor of Computer Applications (BCA) — SSA Government First Grade College, Ballari</h3>
-  <div class="subtitle">2021 – 2024</div>
-
-  <h2>Internships & Practical Training</h2>
-  <h3>Advanced Java Full Stack Development Intern — Anudip Foundation, Bangalore</h3>
-  <div class="subtitle">Oct 2026</div>
+  <h2>Internship Experience</h2>
+  <h3>${anudipExp.role} — ${anudipExp.company}</h3>
+  <div class="subtitle">${anudipExp.period}</div>
   <ul>
-    <li>Developed Java applications applying Object-Oriented Programming (OOP), JDBC, Collections Framework, and Multithreading.</li>
-    <li>Built full-stack web applications using Spring Boot, React.js, MySQL, and REST APIs.</li>
+    ${(anudipExp.bullets || []).map(b => `<li>${b}</li>`).join('')}
   </ul>
 
   <h2>Key Projects</h2>
   ${projects.slice(0, 3).map(proj => `
     <h3>${proj.name}</h3>
-    <div class="subtitle">Tech: ${proj.techStack.join(', ')} ${proj.url ? `| <a href="${proj.url}">Website</a>` : ''}</div>
+    <div class="subtitle">Tech: ${proj.techStack.join(', ')} ${proj.url ? `| <a href="${proj.url}">Website</a>` : ''} ${proj.github ? `| <a href="${proj.github}">GitHub</a>` : ''}</div>
     <ul>
       ${proj.bullets.map(b => `<li>${b}</li>`).join('')}
     </ul>
   `).join('')}
+
+  <h2>Education</h2>
+  <h3>Master of Computer Applications (MCA) — AIMS Institutes, Bangalore</h3>
+  <div class="subtitle">2024 – 2026 (Completed Oct 2026) | Recipient of Best AI Innovation Medal</div>
+  <h3>Bachelor of Computer Applications (BCA) — SSA Government First Grade College, Ballari</h3>
+  <div class="subtitle">2021 – 2024</div>
 
   <h2>Certifications & Awards</h2>
   <ul>

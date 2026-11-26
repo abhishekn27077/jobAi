@@ -17,12 +17,14 @@ export const VALID_APPLICATION_STATUSES = [
   'submission_verification_pending',
   'user_submitted',
   'submitted',
+  'recruiter_contacted',
   'applied',
   'assessment',
   'interview',
   'offer',
   'rejected',
   'withdrawn',
+  'on_hold',
   'closed',
   'expired'
 ];
@@ -289,3 +291,40 @@ export function checkDuplicateApplication(jobOrId) {
 }
 
 export { getPortalSupportMatrix };
+
+/**
+ * Undoes an accidental "Mark as Submitted" action while preserving full status history.
+ */
+export function undoSubmittedApplication(jobId, reason = 'User undid submitted status') {
+  const db = getDatabase();
+  const existing = db.prepare('SELECT * FROM applications WHERE job_id = ?').get(jobId);
+  if (!existing) {
+    throw new Error(`No application record found for job #${jobId}.`);
+  }
+
+  let history = [];
+  try {
+    history = existing.status_history_json ? JSON.parse(existing.status_history_json) : [];
+  } catch {}
+
+  history.push({
+    from: existing.status,
+    to: 'preparing',
+    timestamp: new Date().toISOString(),
+    notes: reason,
+    userConfirmed: true
+  });
+
+  db.prepare(`
+    UPDATE applications
+    SET status = 'preparing',
+        applied_date = NULL,
+        user_approved = 0,
+        status_history_json = ?,
+        updated_at = datetime('now')
+    WHERE job_id = ?
+  `).run(JSON.stringify(history), jobId);
+
+  db.prepare(`UPDATE jobs SET status = 'discovered', updated_at = datetime('now') WHERE id = ?`).run(jobId);
+  return getApplicationByJobId(jobId);
+}

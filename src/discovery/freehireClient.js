@@ -66,7 +66,7 @@ function normalizeFreehireJob(job) {
     title: (job.title || '').trim(),
     company: (job.company || 'Unknown Company').trim(),
     location: (job.location || '').trim(),
-    url: job.url || `https://freehire.me/jobs/${job.public_slug}`,
+    url: job.url || job.apply_url || `https://freehire.me/jobs/${job.public_slug}`,
     description: cleanDesc,
     salary: job.salary ? String(job.salary) : null,
     postedAt: job.posted_at || job.created_at || null,

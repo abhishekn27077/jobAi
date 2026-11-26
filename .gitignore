@@ -44,3 +44,13 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+# Local Chrome profile config (contains local paths & personal email)
+data/chrome_profile_config.json
+
+# Accidental screenshots & temporary exports in workspace root
+*.png
+*.jpg
+*.jpeg
+*.pdf
+*.docx

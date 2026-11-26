@@ -77,6 +77,12 @@ test('Degree Classifier strictly flags BTECH_STRICT_RESTRICTION as ineligible an
   assert.strictEqual(res2.classification, DEGREE_CLASSIFICATIONS.BTECH_STRICT_RESTRICTION);
   assert.strictEqual(res2.eligibilityStatus, ELIGIBILITY_STATUSES.INELIGIBLE);
   assert.strictEqual(res2.isStrictlyIneligible, true);
+
+  const jd3 = 'Entry-level AI/ML Engineer. B.Tech ONLY, no MCA.';
+  const res3 = classifyDegreeRequirement(jd3);
+  assert.strictEqual(res3.classification, DEGREE_CLASSIFICATIONS.BTECH_STRICT_RESTRICTION);
+  assert.strictEqual(res3.eligibilityStatus, ELIGIBILITY_STATUSES.INELIGIBLE);
+  assert.strictEqual(res3.isStrictlyIneligible, true);
 });
 
 test('Degree Classifier treats unclear qualification requirements as unknown without penalizing candidate', () => {

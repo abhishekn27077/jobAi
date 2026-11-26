@@ -3,7 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CareerOS | Personal AI Career Automation System</title>
+  <title>CareerOS | Job Search &amp; Application Workspace</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233b82f6' stroke-width='2.2'%3E%3Crect x='2' y='7' width='20' height='14' rx='2'/%3E%3Cpath d='M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -27,52 +31,46 @@
     <nav class="nav-tabs-bar" id="primaryNavTabs" aria-label="Primary Navigation">
       <button class="nav-tab active" id="navJobsBtn" data-view="jobs" title="Browse and search job opportunities">
         <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-        <span>Jobs</span>
+        <span>Find Jobs</span>
       </button>
-      <button class="nav-tab" id="viewApplicationsBtn" data-view="applications" title="Application pipeline and status tracker">
+      <button class="nav-tab" id="viewApplicationsBtn" data-view="applications" title="Applied jobs and status tracker">
         <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-        <span>Applications</span>
+        <span>Applied Jobs</span>
         <span class="nav-badge" id="navAppsBadge">3</span>
       </button>
-      <button class="nav-tab" id="navResumeStudioBtn" data-view="resume-studio" title="ATS Resume Studio and version vault">
-        <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-        <span>Resume Studio</span>
-      </button>
-      <button class="nav-tab" id="navContactsBtn" data-view="contacts" title="Recruiter Hub, Contact Discovery &amp; Outreach">
+      <button class="nav-tab" id="navContactsBtn" data-view="contacts" title="Contacts, HR Discovery &amp; Outreach">
         <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-        <span>Recruiter Hub</span>
+        <span>Contacts &amp; Outreach</span>
       </button>
-      <button class="nav-tab" id="commsHubBtn" data-view="comms" title="Communications, Gmail Inbox &amp; Follow-Ups">
-        <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-        <span>Communications</span>
-        <span class="nav-badge" id="navCommsBadge">2</span>
-      </button>
-      <button class="nav-tab" id="careerIntelBtn" data-view="intelligence" title="Career Intelligence, Skill Gaps &amp; Salary">
-        <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-        <span>Career Intelligence</span>
-      </button>
-      <details class="nav-dropdown" id="secondaryNavDropdown">
-        <summary class="nav-tab nav-more-trigger" title="Profile, settings and system tools">
-          <span>More</span>
-          <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-        </summary>
-        <div class="nav-dropdown-content">
-          <button class="nav-tab" id="viewProfileBtn" data-view="profile" title="Verified candidate profile">
-            <span>Candidate Profile</span>
-          </button>
-          <button class="nav-tab" id="automationBackupBtn" data-view="settings" title="System automation, diagnostics, backups &amp; tools">
-            <span>Tools &amp; Diagnostics</span>
-          </button>
-        </div>
-      </details>
     </nav>
     <div class="nav-actions">
+      <button class="btn btn-outline btn-sm" id="automationBackupBtn" data-view="settings" onclick="switchWorkspaceView('settings')" title="Settings, Profile &amp; Source Health">Settings</button>
       <button class="btn btn-outline btn-sm theme-toggle-btn" id="themeToggleBtn" onclick="toggleTheme()" title="Switch Light/Dark Mode" aria-label="Toggle theme">Light</button>
       <button class="btn btn-primary btn-sm" id="scanBtn" title="Scan online repositories for fresher jobs">Scan Jobs</button>
     </div>
   </header>
 
   <main class="container">
+    <!-- ========================================== -->
+    <!-- VIEW 0: CLEAN OVERVIEW DASHBOARD           -->
+    <!-- ========================================== -->
+    <section id="viewDashboard" class="workspace-view hidden">
+      <div class="workspace-header">
+        <div>
+          <div class="workspace-eyebrow">Workspace Overview</div>
+          <h2 class="workspace-title">CareerOS Summary</h2>
+          <p class="workspace-subtext">Real-time metrics calculated from your verified SQLite Career Vault. Zero inflated counters.</p>
+        </div>
+        <div class="workspace-header-actions">
+          <button class="btn btn-primary btn-sm" onclick="switchWorkspaceView('jobs')">Find Jobs</button>
+          <button class="btn btn-outline btn-sm" onclick="switchWorkspaceView('applications')">Applied Workspace</button>
+        </div>
+      </div>
+      <div id="dashboardOverviewBody" class="workspace-content-pane">
+        <!-- Injected dynamically via app.js -->
+      </div>
+    </section>
+
     <!-- ========================================== -->
     <!-- VIEW 1: JOB DISCOVERY & RECOMMENDATIONS   -->
     <!-- ========================================== -->
@@ -84,7 +82,7 @@
         <div class="kpi-pill"><span class="kpi-bullet text-warning">●</span> <strong id="statConsider" class="text-warning">0</strong> <span class="kpi-tag">Review</span></div>
         <div class="kpi-pill"><span class="kpi-bullet text-info">●</span> <strong id="statSaved" class="text-info">0</strong> <span class="kpi-tag">Saved</span></div>
         <div class="kpi-pill-right">
-          <button type="button" class="btn btn-primary btn-sm" id="btnStartBatchSession" onclick="openBatchSessionModal()" title="Launch sequential batch application preparation queue">Start Application Session</button>
+          <button type="button" class="btn btn-outline btn-sm" id="btnOpenImportJobsModal" onclick="openImportJobsModal()" title="Import single URL, batch URLs, LinkedIn search URL, or JSON/CSV">Import Jobs</button>
         </div>
       </section>
 
@@ -95,7 +93,7 @@
             <span class="search-icon" aria-hidden="true">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
             </span>
-            <input type="text" id="unifiedSearchInput" class="unified-search-input" placeholder="Search by role, skills, location (e.g. 'MCA Fresher Java Developer Bengaluru', 'Junior Spring Boot')..." />
+            <input type="text" id="unifiedSearchInput" class="unified-search-input" placeholder="Search roles or comma-separated queries (e.g. 'Java Developer, Junior Java Developer, Spring Boot')..." />
           </div>
           <div class="search-actions-group">
             <button id="btnExecuteSearch" class="btn btn-primary search-submit-btn">Search</button>
@@ -104,13 +102,15 @@
           </div>
         </div>
 
-        <!-- Fast Natural Language Suggestions -->
-        <div class="search-suggestion-chips" id="searchSuggestionChips">
-          <span class="suggestion-lead">Suggested:</span>
-          <button type="button" class="search-chip-btn" data-query="MCA Fresher Java Developer Bengaluru">MCA Fresher Java (Bengaluru)</button>
-          <button type="button" class="search-chip-btn" data-query="Junior Spring Boot Developer Bangalore">Junior Spring Boot (Bangalore)</button>
-          <button type="button" class="search-chip-btn" data-query="Associate Software Engineer 0-1 years">Associate Software Engineer (0-1 yrs)</button>
-          <button type="button" class="search-chip-btn" data-query="Remote Java Developer">Remote Java Developer</button>
+        <!-- Compact Quick Filter Pills (Phase 19) -->
+        <div class="search-suggestion-chips" id="quickFilterPills" aria-label="Quick Filters">
+          <span class="suggestion-lead">Quick:</span>
+          <button type="button" class="quick-pill-btn" onclick="applyQuickFilter('fresher', this)">Fresher</button>
+          <button type="button" class="quick-pill-btn" onclick="applyQuickFilter('24h', this)">Last 24 hours</button>
+          <button type="button" class="quick-pill-btn" onclick="applyQuickFilter('7d', this)">Last 7 days</button>
+          <button type="button" class="quick-pill-btn" onclick="applyQuickFilter('strong', this)">Strong Match</button>
+          <button type="button" class="quick-pill-btn" onclick="applyQuickFilter('remote', this)">Remote</button>
+          <button type="button" class="quick-pill-btn" onclick="applyQuickFilter('bengaluru', this)">Bengaluru</button>
         </div>
 
         <!-- Compact Primary Filter Row -->
@@ -151,6 +151,17 @@
                 <option value="smartrecruiters">SmartRecruiters</option>
                 <option value="workable">Workable</option>
               </optgroup>
+              <optgroup label="Public Remote &amp; Tech Feeds (Live API/RSS)">
+                <option value="remotive">Remotive</option>
+                <option value="arbeitnow">Arbeitnow</option>
+                <option value="himalayas">Himalayas</option>
+                <option value="jobicy">Jobicy</option>
+                <option value="remoteok">RemoteOK</option>
+                <option value="weworkremotely">We Work Remotely</option>
+                <option value="hn_hiring">HN Who is Hiring</option>
+                <option value="hasjob">Hasjob (HasGeek)</option>
+                <option value="unstop">Unstop</option>
+              </optgroup>
               <optgroup label="Career Pages &amp; Aggregators">
                 <option value="career_pages">Career Pages</option>
                 <option value="freehire">FreeHire</option>
@@ -160,6 +171,15 @@
                 <option value="naukri">Naukri (External)</option>
                 <option value="indeed">Indeed (External)</option>
                 <option value="linkedin">LinkedIn (External)</option>
+                <option value="internshala">Internshala (External)</option>
+                <option value="wellfound">Wellfound (External)</option>
+                <option value="foundit">Foundit (External)</option>
+                <option value="cutshort">Cutshort (External)</option>
+                <option value="hirist">Hirist (External)</option>
+                <option value="freshersworld">Freshersworld (External)</option>
+                <option value="ncs">NCS (External)</option>
+                <option value="yc_waas">YC Work at a Startup (External)</option>
+                <option value="peerlist">Peerlist (External)</option>
                 <option value="apna">Apna (External)</option>
                 <option value="workindia">WorkIndia (External)</option>
               </optgroup>
@@ -277,8 +297,12 @@
               <span>Exclude Expired</span>
             </label>
             <label class="filter-checkbox-label">
-              <input type="checkbox" id="chkExcludeApplied" />
-              <span>Exclude Applied</span>
+              <input type="checkbox" id="chkExcludeApplied" checked />
+              <span>Hide Already Submitted</span>
+            </label>
+            <label class="filter-checkbox-label">
+              <input type="checkbox" id="chkExcludeNonMatching" checked />
+              <span>Hide Non-Matching (Disqualified)</span>
             </label>
             <label class="filter-checkbox-label">
               <input type="checkbox" id="chkExcludeSaved" />
@@ -294,26 +318,23 @@
         </div>
       </section>
 
-      <!-- Location Region Tabs (India / Remote India / Worldwide Remote / International) -->
-      <section class="location-regions-bar" id="locationRegionTabs">
-        <button type="button" class="region-tab-btn active" data-region="all">All Regions</button>
-        <button type="button" class="region-tab-btn" data-region="india">India</button>
-        <button type="button" class="region-tab-btn" data-region="remote_india">Remote India</button>
-        <button type="button" class="region-tab-btn" data-region="worldwide_remote">Worldwide Remote</button>
-        <button type="button" class="region-tab-btn" data-region="international">International Onsite/Hybrid</button>
-      </section>
-
-      <!-- Practical Status Filter Tabs -->
-      <section class="toolbar">
+      <!-- Compact Toolbar (Status Tabs + Region Filter) -->
+      <section class="toolbar compact-toolbar">
         <div class="filter-group">
           <button class="filter-tab active" data-filter="all">All Jobs</button>
           <button class="filter-tab" data-filter="RECOMMENDED">Strong Match</button>
           <button class="filter-tab" data-filter="CONSIDER">Review</button>
           <button class="filter-tab" data-filter="saved">Saved</button>
-          <button class="filter-tab" data-filter="ready_to_apply">Ready to Apply</button>
           <button class="filter-tab" data-filter="applied">Applied</button>
         </div>
         <div class="toolbar-right-info">
+          <div class="location-regions-bar compact-regions" id="locationRegionTabs">
+            <button type="button" class="region-tab-btn active" data-region="all">All</button>
+            <button type="button" class="region-tab-btn" data-region="india">India</button>
+            <button type="button" class="region-tab-btn" data-region="remote_india">Remote IN</button>
+            <button type="button" class="region-tab-btn" data-region="worldwide_remote">Global Remote</button>
+          </div>
+          <button type="button" id="btnMobileSidebarToggle" class="btn btn-outline btn-sm mobile-filters-btn" onclick="toggleMobileSidebar()">Filters</button>
           <span class="count-tag" id="visibleCount">0 roles</span>
         </div>
       </section>
@@ -341,15 +362,54 @@
         </div>
       </section>
 
-      <!-- Job Feed -->
-      <section class="job-list-section">
-        <div id="loadingIndicator" class="loading hidden">
-          <div class="spinner"></div>
-          <p>Searching job repositories...</p>
-        </div>
-        <div class="job-grid" id="jobGrid">
-          <!-- Cards injected via app.js -->
-        </div>
+      <!-- Naukri-Style 2-Column Job Feed + Sticky Filter Sidebar -->
+      <section class="jobs-two-col-layout">
+        <aside class="jobs-sidebar-card" aria-label="Quick Filters">
+          <div class="sidebar-header-row">
+            <strong>Filters</strong>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="resetAllUnifiedFilters()">Reset</button>
+          </div>
+          <details open class="sidebar-filter-group sidebar-accordion">
+            <summary class="sidebar-group-title">Match Priority</summary>
+            <label class="sidebar-radio"><input type="radio" name="sbPriority" value="all" checked onchange="syncSidebarFilter('priorityFilterSelect', this.value)" /> All Matched</label>
+            <label class="sidebar-radio"><input type="radio" name="sbPriority" value="p1" onchange="syncSidebarFilter('priorityFilterSelect', this.value)" /> Apply First (P1)</label>
+            <label class="sidebar-radio"><input type="radio" name="sbPriority" value="p2" onchange="syncSidebarFilter('priorityFilterSelect', this.value)" /> Strong Match (P2)</label>
+            <label class="sidebar-radio"><input type="radio" name="sbPriority" value="p3" onchange="syncSidebarFilter('priorityFilterSelect', this.value)" /> Review (P3)</label>
+          </details>
+          <details open class="sidebar-filter-group sidebar-accordion">
+            <summary class="sidebar-group-title">Work Mode</summary>
+            <label class="sidebar-radio"><input type="radio" name="sbWorkMode" value="all" checked onchange="syncSidebarFilter('workModeSelect', this.value)" /> All Modes</label>
+            <label class="sidebar-radio"><input type="radio" name="sbWorkMode" value="remote" onchange="syncSidebarFilter('workModeSelect', this.value)" /> Remote</label>
+            <label class="sidebar-radio"><input type="radio" name="sbWorkMode" value="hybrid" onchange="syncSidebarFilter('workModeSelect', this.value)" /> Hybrid</label>
+            <label class="sidebar-radio"><input type="radio" name="sbWorkMode" value="onsite" onchange="syncSidebarFilter('workModeSelect', this.value)" /> On-site</label>
+          </details>
+          <details open class="sidebar-filter-group sidebar-accordion">
+            <summary class="sidebar-group-title">Freshness</summary>
+            <label class="sidebar-radio"><input type="radio" name="sbDatePosted" value="all" checked onchange="syncSidebarFilter('datePostedSelect', this.value)" /> All Time</label>
+            <label class="sidebar-radio"><input type="radio" name="sbDatePosted" value="24h" onchange="syncSidebarFilter('datePostedSelect', this.value)" /> Last 24 Hours</label>
+            <label class="sidebar-radio"><input type="radio" name="sbDatePosted" value="3d" onchange="syncSidebarFilter('datePostedSelect', this.value)" /> Last 3 Days</label>
+            <label class="sidebar-radio"><input type="radio" name="sbDatePosted" value="7d" onchange="syncSidebarFilter('datePostedSelect', this.value)" /> Last 7 Days</label>
+          </details>
+          <details open class="sidebar-filter-group sidebar-accordion">
+            <summary class="sidebar-group-title">Profile Guard</summary>
+            <label class="filter-checkbox-label">
+              <input type="checkbox" id="sbHideNonMatching" checked onchange="syncHideNonMatching(this.checked)" />
+              <span>Hide Non-Matching</span>
+            </label>
+          </details>
+        </aside>
+
+        <section class="job-list-section jobs-feed-column">
+          <div id="jobsPaginationTop" class="jobs-pagination-bar hidden"></div>
+          <div id="loadingIndicator" class="loading hidden">
+            <div class="spinner"></div>
+            <p>Searching job repositories...</p>
+          </div>
+          <div class="job-grid" id="jobGrid">
+            <!-- Cards injected via app.js -->
+          </div>
+          <div id="jobsPaginationBottom" class="jobs-pagination-bar hidden"></div>
+        </section>
       </section>
     </section>
 
@@ -774,10 +834,73 @@
             <button class="btn btn-outline btn-sm" id="exportJsonBtn" title="Export pipeline to JSON">📁 Export JSON</button>
           </div>
         </div>
+
+        <div class="settings-card">
+          <h3>🌐 Connected Chrome Profile (LinkedIn / Naukri / Indeed)</h3>
+          <p class="text-muted">Use your already-logged-in Chrome profile when launching assisted applications:</p>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;">
+            <select id="chromeProfileSelect" class="filter-select" style="min-width:240px;"></select>
+            <label class="filter-checkbox-label" style="margin:0;">
+              <input type="checkbox" id="chkUseChromeProfile" checked />
+              <span>Enabled</span>
+            </label>
+            <button class="btn btn-primary btn-sm" onclick="saveChromeProfileSelection()">Save Chrome Profile</button>
+          </div>
+          <div id="chromeProfileStatusText" class="subtext" style="margin-top:6px;font-size:12px;"></div>
+        </div>
       </div>
 
       <div id="settingsViewBody" class="workspace-content-pane">
         <!-- Automation and backup content injected dynamically -->
+      </div>
+    </section>
+    <!-- ========================================== -->
+    <!-- VIEW 7: AI AGENT TASKS & APPROVAL CENTER   -->
+    <!-- ========================================== -->
+    <section id="viewAgentTasks" class="workspace-view hidden">
+      <div class="workspace-header">
+        <div>
+          <h2>AI Agent Tasks &amp; Approval Center</h2>
+          <p class="subtext">Structured Antigravity tasks, explicit human approval gates, and recovery controls</p>
+        </div>
+        <div class="header-actions" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <select id="agentTaskStatusFilter" class="filter-select" onchange="loadAndRenderAgentTasksView()">
+            <option value="">All Statuses</option>
+            <option value="awaiting_approval">Awaiting Approval</option>
+            <option value="needs_manual_action">Needs Manual Action</option>
+            <option value="queued">Queued</option>
+            <option value="running">Running</option>
+            <option value="paused">Paused</option>
+            <option value="completed">Completed</option>
+            <option value="failed">Failed</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+          <button class="btn btn-outline btn-sm" onclick="loadAndRenderAgentTasksView()">Refresh</button>
+        </div>
+      </div>
+
+      <div id="agentBridgeStatusBanner" class="card" style="margin-bottom: 14px; padding: 12px 16px;">
+        <span class="subtext">Checking Antigravity MCP Bridge &amp; Chrome Profile connection...</span>
+      </div>
+
+      <div class="card" style="margin-bottom: 18px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <h3 style="margin:0;">Approval Center (Explicit Per-Action Consent)</h3>
+          <span class="subtext">No blanket approvals • Stops before external submit/send</span>
+        </div>
+        <div id="approvalCenterContainer">
+          <p class="subtext">Loading pending approvals...</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <h3 style="margin:0;">AI Agent Tasks Queue</h3>
+          <span class="subtext">Local-first MCP Bridge: <code>src/agent/mcpServer.js</code></span>
+        </div>
+        <div id="agentTasksContainer">
+          <p class="subtext">Loading agent tasks...</p>
+        </div>
       </div>
     </section>
   </main>
@@ -871,6 +994,44 @@
 
   <div class="modal hidden" id="automationBackupModal" style="display: none !important;">
     <div id="automationBackupModalBody"></div>
+  </div>
+
+  <!-- Import Jobs Modal (Phase 17) -->
+  <div class="modal hidden" id="importJobsModal">
+    <div class="modal-content" style="max-width: 720px;">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <span class="modal-badge-pill">Multi-Job &amp; URL Import</span>
+          <h2>Import Jobs</h2>
+        </div>
+        <button class="close-btn" onclick="closeImportJobsModal()" title="Close Modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">
+          Paste one job URL, multiple URLs (one per line), a LinkedIn search URL, or JSON/CSV job records. Preview before saving to check duplicates and unsupported portals.
+        </p>
+        <div style="margin-bottom: 12px;">
+          <label for="importBatchUrlsInput" style="display:block; font-size: 12px; font-weight: 600; margin-bottom: 4px;">Job URLs or LinkedIn Search URL</label>
+          <textarea id="importBatchUrlsInput" rows="4" class="refinement-text-input" style="width:100%; font-family: monospace; font-size: 12px;" placeholder="https://www.linkedin.com/jobs/view/4484739808/&#10;https://www.linkedin.com/jobs/search/?keywords=Java+Developer&amp;location=Bengaluru"></textarea>
+        </div>
+        <div style="margin-bottom: 12px;">
+          <label for="importStructuredInput" style="display:block; font-size: 12px; font-weight: 600; margin-bottom: 4px;">Or Paste JSON / CSV (Optional)</label>
+          <textarea id="importStructuredInput" rows="3" class="refinement-text-input" style="width:100%; font-family: monospace; font-size: 12px;" placeholder='[{"title":"Java Developer","company":"Acme","url":"https://...","location":"Bengaluru"}]'></textarea>
+        </div>
+        <div style="margin-bottom: 12px; padding: 10px 12px; background: var(--surface-alt, var(--surface)); border: 1px solid var(--border); border-radius: 8px; font-size: 12px;">
+          <strong>Extracting all 20 jobs from an open Naukri / LinkedIn tab?</strong>
+          <div style="color: var(--text-muted); margin: 4px 0 8px;">
+            Naukri blocks server-side fetching. Open your Naukri/LinkedIn search tab, click <strong>Copy Browser Extractor</strong>, paste into DevTools Console (F12 &rarr; Console &rarr; Enter), then paste the copied JSON below!
+          </div>
+          <button type="button" class="btn btn-outline btn-sm" onclick="copyVisibleJobsExtractorScript()">Copy Browser Extractor (Naukri / LinkedIn)</button>
+        </div>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px;">
+          <button type="button" class="btn btn-outline btn-sm" onclick="runBatchJobImport(true)">Preview Import</button>
+          <button type="button" class="btn btn-primary btn-sm" onclick="runBatchJobImport(false)">Import &amp; Save</button>
+        </div>
+        <div id="importBatchReport" class="hidden" style="background: var(--surface-alt, var(--surface)); border: 1px solid var(--border); border-radius: 8px; padding: 12px; font-size: 13px;"></div>
+      </div>
+    </div>
   </div>
 
   <div id="toastContainer" class="toast-container"></div>

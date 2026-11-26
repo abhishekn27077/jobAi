@@ -351,6 +351,7 @@ export function executeUnifiedSearch(criteria = {}) {
     excludeSaved = false,
     excludeDismissed = true,
     excludeDuplicates = true,
+    excludeNonMatching = false,
     locationRegion = 'all', // 'all' | 'india' | 'remote_india' | 'worldwide_remote' | 'international'
     sort = 'relevance', // 'relevance' | 'newest' | 'match_score'
     limit = 500,
@@ -375,12 +376,20 @@ export function executeUnifiedSearch(criteria = {}) {
     ORDER BY j.id DESC
   `).all();
 
-  // Normalize search parameters
+  // Normalize search parameters (supports multi-query via comma/semicolon separation)
+  const subQueries = (q || '').split(/[,;\n]+/).map(s => s.trim()).filter(Boolean);
+  const parsedSubQueries = subQueries.length > 1
+    ? subQueries.map(sq => ({
+      raw: sq,
+      parsedNl: parseNaturalLanguageQuery(sq),
+      tokens: sq.toLowerCase().split(/\s+/).filter(Boolean)
+    }))
+    : null;
   const parsedNl = parseNaturalLanguageQuery(q);
   const generalQueryTokens = (q || '').toLowerCase().trim().split(/\s+/).filter(Boolean);
   const titleFilter = (title || '').toLowerCase().trim();
   const companyFilter = (company || '').toLowerCase().trim();
-  
+
   const skillFilters = (Array.isArray(skills) ? skills : (skills ? [skills] : []))
     .map(s => String(s).toLowerCase().trim())
     .filter(Boolean);
@@ -389,8 +398,8 @@ export function executeUnifiedSearch(criteria = {}) {
     .map(k => String(k).toLowerCase().trim())
     .filter(Boolean);
 
-  const excludeFilterTokens = (Array.isArray(excludedKeywords) 
-    ? excludedKeywords 
+  const excludeFilterTokens = (Array.isArray(excludedKeywords)
+    ? excludedKeywords
     : String(excludedKeywords).split(/[,;|\s]+/))
     .map(k => String(k).toLowerCase().trim())
     .filter(Boolean);
@@ -425,8 +434,8 @@ export function executeUnifiedSearch(criteria = {}) {
     });
 
     const isExpired = (
-      row.status === 'expired' || 
-      row.verification_status === 'expired' || 
+      row.status === 'expired' ||
+      row.verification_status === 'expired' ||
       row.recommendation === 'EXPIRED' ||
       classifyFreshness(row) === FRESHNESS_STATUSES.EXPIRED
     );
@@ -460,7 +469,11 @@ export function executeUnifiedSearch(criteria = {}) {
       whyMatches: fit.whyMatches,
       concerns: fit.concerns,
       evidenceBreakdown: fit.evidenceBreakdown,
-      jobQualityScore: fit.jobQualityScore
+      jobQualityScore: fit.jobQualityScore,
+      alreadySubmitted: Boolean(
+        row.status === 'applied' ||
+        ['submitted', 'applied', 'user_submitted', 'interview', 'offer'].includes((row.application_status || '').toLowerCase())
+      )
     };
 
     if (isExpired) {
@@ -476,7 +489,7 @@ export function executeUnifiedSearch(criteria = {}) {
     }
 
     // Exclude applied jobs
-    if (excludeApplied && (job.status === 'applied' || job.application_status === 'submitted')) {
+    if (excludeApplied && job.alreadySubmitted) {
       continue;
     }
 
@@ -487,6 +500,15 @@ export function executeUnifiedSearch(criteria = {}) {
 
     // Exclude dismissed jobs
     if (excludeDismissed && job.status === 'dismissed') {
+      continue;
+    }
+
+    // Exclude non-matching / disqualified jobs when requested
+    if (excludeNonMatching && (
+      job.priorityCode === 'DISQUALIFIED' ||
+      job.recommendation === 'REJECTED' ||
+      (job.score || 0) < 35
+    )) {
       continue;
     }
 
@@ -614,7 +636,7 @@ export function executeUnifiedSearch(criteria = {}) {
     if (locationsList.length > 0 && !locationsList.includes('all')) {
       const jLoc = (job.location || '').toLowerCase();
       const jWp = (job.work_mode || '').toLowerCase();
-      
+
       const matchesAnyLocation = locationsList.some(locNeedle => {
         if (locNeedle === 'bengaluru' || locNeedle === 'bangalore') {
           return jLoc.includes('bengaluru') || jLoc.includes('bangalore') || jLoc.includes('karnataka') || jLoc.includes('blr') || jLoc.includes('whitefield') || jLoc.includes('electronic city');
@@ -658,63 +680,8 @@ export function executeUnifiedSearch(criteria = {}) {
       if (!matchesAllKeywords) continue;
     }
 
-    // Natural Language Query Intelligence & General Query Tokens
-    if (parsedNl.hasCriteria) {
-      const fullText = [
-        job.title || '',
-        job.company || '',
-        job.location || '',
-        job.description || '',
-        job.summary_reason || '',
-        job.work_mode || '',
-        job.source || '',
-        ...(job.skills_matched || []),
-        ...(job.skills_missing || [])
-      ].join(' ').toLowerCase();
-
-      // 1. Fresher Intent
-      if (parsedNl.isFresher && job.fresher_eligible !== 1 && expMin !== null && expMin > 1) {
-        continue;
-      }
-
-      // 2. Degree Intent
-      if (parsedNl.extractedDegrees.includes('mca')) {
-        const summaryText = (job.summary_reason || '').toLowerCase();
-        if (summaryText.includes('strictly requires b.tech') && !summaryText.includes('mca')) {
-          continue;
-        }
-      }
-
-      // 3. Location Intent
-      if (parsedNl.extractedLocations.length > 0 && !locationsList.length) {
-        const jLoc = (job.location || '').toLowerCase();
-        const jWp = (job.work_mode || '').toLowerCase();
-        const locMatch = parsedNl.extractedLocations.some(l => {
-          if (l === 'bengaluru') return jLoc.includes('bengaluru') || jLoc.includes('bangalore') || jLoc.includes('karnataka') || jLoc.includes('blr') || jWp === 'remote';
-          if (l === 'remote') return jLoc.includes('remote') || jWp === 'remote';
-          return jLoc.includes(l);
-        });
-        if (!locMatch) continue;
-      }
-
-      // 4. Role or Skills Intent
-      if (parsedNl.extractedRoles.length > 0 || parsedNl.extractedSkills.length > 0) {
-        const roleMatch = parsedNl.extractedRoles.some(r => {
-          const variants = expandSmartRoleTerms(r);
-          return variants.some(v => fullText.includes(v));
-        });
-        const skillMatch = parsedNl.extractedSkills.some(s => fullText.includes(s));
-        if (!roleMatch && !skillMatch) {
-          continue;
-        }
-      }
-
-      // 5. Residual specific tokens (e.g. company names like Cisco, PayPal)
-      if (parsedNl.residualTokens && parsedNl.residualTokens.length > 0) {
-        const residualMatch = parsedNl.residualTokens.every(tok => fullText.includes(tok));
-        if (!residualMatch) continue;
-      }
-    } else if (generalQueryTokens.length > 0) {
+    // Natural Language Query Intelligence & Multi-Query Matching
+    const matchesSingleQuery = (sqParsedNl, sqTokens) => {
       const fullText = [
         job.title || '',
         job.company || '',
@@ -728,8 +695,50 @@ export function executeUnifiedSearch(criteria = {}) {
         ...(job.skills_missing || [])
       ].join(' ').toLowerCase();
 
-      const allTokensMatch = generalQueryTokens.every(token => fullText.includes(token));
-      if (!allTokensMatch) continue;
+      if (sqParsedNl.hasCriteria) {
+        if (sqParsedNl.isFresher && job.fresher_eligible !== 1 && expMin !== null && expMin > 1) {
+          return false;
+        }
+        if (sqParsedNl.extractedDegrees.includes('mca')) {
+          const summaryText = (job.summary_reason || '').toLowerCase();
+          if (summaryText.includes('strictly requires b.tech') && !summaryText.includes('mca')) {
+            return false;
+          }
+        }
+        if (sqParsedNl.extractedLocations.length > 0 && !locationsList.length) {
+          const jLoc = (job.location || '').toLowerCase();
+          const jWp = (job.work_mode || '').toLowerCase();
+          const locMatch = sqParsedNl.extractedLocations.some(l => {
+            if (l === 'bengaluru') return jLoc.includes('bengaluru') || jLoc.includes('bangalore') || jLoc.includes('karnataka') || jLoc.includes('blr') || jWp === 'remote';
+            if (l === 'remote') return jLoc.includes('remote') || jWp === 'remote';
+            return jLoc.includes(l);
+          });
+          if (!locMatch) return false;
+        }
+        if (sqParsedNl.extractedRoles.length > 0 || sqParsedNl.extractedSkills.length > 0) {
+          const roleMatch = sqParsedNl.extractedRoles.some(r => {
+            const variants = expandSmartRoleTerms(r);
+            return variants.some(v => fullText.includes(v));
+          });
+          const skillMatch = sqParsedNl.extractedSkills.some(s => fullText.includes(s));
+          if (!roleMatch && !skillMatch) return false;
+        }
+        if (sqParsedNl.residualTokens && sqParsedNl.residualTokens.length > 0) {
+          const residualMatch = sqParsedNl.residualTokens.every(tok => fullText.includes(tok));
+          if (!residualMatch) return false;
+        }
+        return true;
+      } else if (sqTokens.length > 0) {
+        return sqTokens.every(token => fullText.includes(token));
+      }
+      return true;
+    };
+
+    if (parsedSubQueries) {
+      const anyMatched = parsedSubQueries.some(sq => matchesSingleQuery(sq.parsedNl, sq.tokens));
+      if (!anyMatched) continue;
+    } else if (parsedNl.hasCriteria || generalQueryTokens.length > 0) {
+      if (!matchesSingleQuery(parsedNl, generalQueryTokens)) continue;
     }
 
     filteredRaw.push(job);
@@ -737,7 +746,7 @@ export function executeUnifiedSearch(criteria = {}) {
 
   // 2. Accurate Search Summary Metrics Generation (from filteredRaw)
   const totalSourceResults = filteredRaw.length;
-  
+
   // Calculate source distribution for tabs
   const sourceCounts = {};
   for (const src of SOURCES) {
@@ -863,7 +872,7 @@ export function executeUnifiedSearch(criteria = {}) {
   }
 
   // Final deduplicated list or raw list based on criteria
-  const finalResults = excludeDuplicates 
+  const finalResults = excludeDuplicates
     ? dedupEntries.map(e => e.primaryJob)
     : filteredRaw;
 

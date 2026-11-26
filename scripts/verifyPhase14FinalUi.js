@@ -8,6 +8,8 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { chromium } from 'playwright';
 import { startDashboardServer } from '../src/dashboard/server.js';
+import { generateStudioResume } from '../src/resumes/resumeStudioService.js';
+import { renderResumeHtml } from '../src/resumes/templates/templateEngine.js';
 
 const SCREENSHOT_DIR = 'C:/Users/Abhis/.gemini/antigravity/brain/3fa685b8-0a44-4220-bf05-35fc529bce65/ux_screenshots';
 if (!fs.existsSync(SCREENSHOT_DIR)) fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
@@ -60,12 +62,26 @@ async function runVerification() {
         await page.click('#btnToggleAdvancedFilters');
         await page.waitForTimeout(400);
         await page.screenshot({ path: path.join(SCREENSHOT_DIR, 'phase14_final_advanced_filters.png'), fullPage: false });
+        // Test Overview Dashboard View
+        await page.click('#navDashboardBtn');
+        await page.waitForTimeout(700);
+        await page.screenshot({ path: path.join(SCREENSHOT_DIR, 'phase14_final_dashboard.png'), fullPage: false });
       }
       if (vp.width === 375) {
         await page.screenshot({ path: path.join(SCREENSHOT_DIR, 'phase14_final_mobile_375.png'), fullPage: false });
       }
       await ctx.close();
     }
+
+    // Visual ATS Resume Sample Inspection
+    const resumeCtx = await browser.newContext({ viewport: { width: 820, height: 1120 } });
+    const resumePage = await resumeCtx.newPage();
+    const studioRes = await generateStudioResume({ title: 'Junior Java Developer', company: 'TechCorp Bengaluru', description: 'Java, Spring Boot, SQL, REST APIs, MCA Fresher' }, { template: 'ats_professional' });
+    const resumeHtml = renderResumeHtml(studioRes.content, 'ats_professional');
+    await resumePage.setContent(resumeHtml, { waitUntil: 'load' });
+    await resumePage.screenshot({ path: path.join(SCREENSHOT_DIR, 'phase14_ats_resume_sample.png'), fullPage: true });
+    await resumeCtx.close();
+
     console.log('Phase 14 Final UI & Responsive Verification completed!');
   } finally {
     await browser.close();

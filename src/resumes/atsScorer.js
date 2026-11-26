@@ -161,6 +161,34 @@ export function calculateAtsScore(jdAnalysis, resumeData, candidateProfile = nul
       uncertainRequirements: eligibilityAssessment.uncertainRequirements || [],
       unverifiedClaims: reqCoverage.unverifiedInProfile
     },
+    transparentBreakdown: {
+      A_keywordAlignment: {
+        score: reqCoverage.score,
+        max: reqCoverage.max,
+        matched: reqCoverage.matched,
+        missing: reqCoverage.missingMandatory
+      },
+      B_evidenceTechnicalMatch: {
+        score: techRelevance.score + projRelevance.score,
+        max: techRelevance.max + projRelevance.max,
+        note: 'Derived strictly from verified profile skills, internships, and projects.'
+      },
+      C_formattingAndReadability: {
+        score: atsReadability.score,
+        max: atsReadability.max,
+        note: 'Single-column ATS layout, standard headings, clean bullet structure.'
+      },
+      D_contentQuality: {
+        score: achievements.score,
+        max: achievements.max,
+        note: 'Action + Technical Implementation + Purpose/Outcome without inflated claims.'
+      },
+      E_eligibilityOrQualificationGaps: {
+        status: eligibilityAssessment.status,
+        unmetMandatory: eligibilityAssessment.unmetMandatoryRequirements || [],
+        uncertain: eligibilityAssessment.uncertainRequirements || []
+      }
+    },
     suggestions
   };
 }

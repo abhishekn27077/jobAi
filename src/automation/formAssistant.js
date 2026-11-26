@@ -9,6 +9,7 @@ import { getPortalAdapter } from './portalAdapters/portalRegistry.js';
 import { generateScreeningAnswers } from './screeningEngine.js';
 import { updateApplicationStatus } from '../tracker/applicationTracker.js';
 import { getDatabase } from '../db/schema.js';
+import { getChromeProfileConfig, openUrlInChromeProfile } from './chromeProfileConfig.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -246,31 +247,82 @@ export async function launchFormAssistant(job, options = {}) {
     pdfPath = docs.resumePdfPath;
   }
 
-  // 2. Launch Google Chrome (Human-in-the-Loop)
+  // 2. Launch Google Chrome (Human-in-the-Loop, using configured Chrome Profile when interactive)
   console.log(`[Form Assistant] Launching browser (Headless: ${headless})...`);
-  let browser;
-  try {
-    browser = await chromium.launch({
-      channel: 'chrome',
-      headless,
-      args: ['--start-maximized']
-    });
-  } catch {
+  let browser = null;
+  let context = null;
+  const chromeCfg = getChromeProfileConfig();
+  const shouldUseProfile = !headless && options.useChromeProfile !== false && chromeCfg.enabled && fs.existsSync(chromeCfg.userDataDir);
+
+  if (shouldUseProfile) {
+    // 2a. If user launched Chrome with --remote-debugging-port=9222, attach directly to their open window
+    try {
+      browser = await chromium.connectOverCDP(chromeCfg.cdpUrl, { timeout: 1500 });
+      context = browser.contexts()[0] || await browser.newContext({ viewport: null });
+      console.log(`[Form Assistant] Attached to running Chrome profile "${chromeCfg.profileLabel}" via CDP.`);
+    } catch {
+      // 2b. Try launching persistent context with the exact Chrome profile ("Profile 21" = Abhishek • Work)
+      try {
+        context = await chromium.launchPersistentContext(chromeCfg.userDataDir, {
+          channel: 'chrome',
+          headless: false,
+          viewport: null,
+          args: [`--profile-directory=${chromeCfg.profileDirectory}`, '--start-maximized']
+        });
+        console.log(`[Form Assistant] Launched Chrome profile "${chromeCfg.profileLabel}" (${chromeCfg.profileDirectory}).`);
+      } catch (profileErr) {
+        // 2c. Chrome is already open and holds the User Data lock — open job directly in that Chrome profile window
+        try {
+          const opened = openUrlInChromeProfile(job.url, chromeCfg);
+          console.log(`[Form Assistant] Chrome profile "${opened.profileLabel}" is already open; opened job tab directly in your logged-in profile.`);
+          try {
+            updateApplicationStatus(job.id, 'ready_for_review', {
+              notes: `Opened directly in your logged-in Chrome profile (${opened.profileLabel}). Review, attach ${path.basename(pdfPath)}, and submit manually.`
+            });
+          } catch {}
+          return {
+            success: true,
+            usedExistingChromeWindow: true,
+            chromeProfile: opened.profileDirectory,
+            chromeProfileLabel: opened.profileLabel,
+            jobId: job.id,
+            portal: getPortalAdapter(job.url).name,
+            fieldsFilled: 0,
+            verification: [],
+            resumePdfPath: pdfPath,
+            message: `Opened ${job.url} directly in your logged-in Chrome profile (${opened.profileLabel}).`
+          };
+        } catch {
+          console.warn(`[Form Assistant] Could not attach to Chrome profile (${profileErr.message}); falling back to standard browser.`);
+        }
+      }
+    }
+  }
+
+  if (!context) {
     try {
       browser = await chromium.launch({
-        channel: 'msedge',
+        channel: 'chrome',
         headless,
         args: ['--start-maximized']
       });
     } catch {
-      browser = await chromium.launch({
-        headless,
-        args: ['--start-maximized']
-      });
+      try {
+        browser = await chromium.launch({
+          channel: 'msedge',
+          headless,
+          args: ['--start-maximized']
+        });
+      } catch {
+        browser = await chromium.launch({
+          headless,
+          args: ['--start-maximized']
+        });
+      }
     }
+    context = await browser.newContext({ viewport: null });
   }
 
-  const context = await browser.newContext({ viewport: null });
   const page = await context.newPage();
 
   console.log(`[Form Assistant] Navigating to: ${job.url}`);

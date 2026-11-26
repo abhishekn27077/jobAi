@@ -5,8 +5,7 @@
     "phone": "+91-XXXXXXXXXX",
     "email": "candidate@example.com",
     "linkedIn": "https://linkedin.com/in/abhishekn27077",
-    "gitHub": "https://github.com/abhishekn27077",
-    "portfolio": "https://nearvia.app"
+    "gitHub": "https://github.com/abhishekn27077"
   },
   "summary": "Java Full Stack Developer with hands-on experience building full-stack applications using Java, Spring Boot, React.js and JavaScript, with strong skills in REST API development and SQL and NoSQL databases. Built AI-enabled and IoT projects, including NearVia, a location-based job marketplace.",
   "status": {
@@ -46,7 +45,8 @@
       "type": "Internship / Training",
       "bullets": [
         "Developed Java applications applying OOP, JDBC, Collections Framework and Multithreading.",
-        "Built full-stack web applications using Spring Boot, React.js, MySQL and REST APIs."
+        "Built full-stack web applications using Spring Boot, React.js, MySQL and REST APIs.",
+        "Implemented an Employee Leave Management System using Java, Spring Boot, Hibernate/JPA, React, and MySQL to handle employee leave requests and status tracking."
       ]
     },
     {
@@ -97,16 +97,16 @@
       ]
     },
     {
-      "name": "Employee Leave Management System",
+      "name": "Smart Aquaponics IoT Monitoring System",
       "techStack": [
-        "Java",
-        "Spring Boot",
-        "Hibernate/JPA",
-        "React",
-        "MySQL"
+        "ESP32",
+        "IoT Sensors",
+        "Telegram Bot API"
       ],
+      "award": "Won Second Prize twice at the College Science Day Project Exhibition and the VITM Engineering Fair 2026, Bangalore.",
       "bullets": [
-        "Developed a full-stack leave management application for handling employee leave requests, using Spring Boot and Hibernate/JPA on the backend, React on the frontend and MySQL for data storage."
+        "Built an IoT monitoring system using ESP32 and environmental sensors to track water quality, temperature, and humidity in real time.",
+        "Integrated automated Telegram alert notifications for abnormal sensor readings; won Second Prize twice (College Science Day & VITM Engineering Fair 2026, Bangalore)."
       ]
     },
     {
@@ -118,20 +118,8 @@
         "Telegram Bot API"
       ],
       "bullets": [
-        "Built an autonomous vehicle that identifies waste in real time using OpenCV computer vision on ESP32-CAM video.",
+        "Built an autonomous rover prototype that detects waste in real time using Python and OpenCV computer vision on ESP32-CAM video streams.",
         "Integrated Telegram notifications for remote monitoring; awarded Second Prize at the Science Exhibition."
-      ]
-    },
-    {
-      "name": "Aquaponics Monitoring System",
-      "techStack": [
-        "ESP32",
-        "IoT Sensors",
-        "Telegram Bot API"
-      ],
-      "bullets": [
-        "Built an IoT system using ESP32 and sensors to monitor water quality, temperature and humidity in real time.",
-        "Automated Telegram alerts for abnormal readings, reducing manual monitoring in sustainable aquaponics farming."
       ]
     },
     {
@@ -143,6 +131,20 @@
       ],
       "bullets": [
         "Built a real-time driver drowsiness and fatigue monitoring system utilizing OpenCV computer vision and eye aspect ratio analysis with alert triggers."
+      ]
+    },
+    {
+      "name": "Employee Leave Management System",
+      "internshipLinked": "Anudip Foundation",
+      "techStack": [
+        "Java",
+        "Spring Boot",
+        "Hibernate/JPA",
+        "React",
+        "MySQL"
+      ],
+      "bullets": [
+        "Implemented a full-stack leave management application during the Anudip Foundation internship using Java, Spring Boot, Hibernate/JPA, React, and MySQL to handle employee leave requests and status tracking."
       ]
     },
     {

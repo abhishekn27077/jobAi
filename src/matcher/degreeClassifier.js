@@ -47,7 +47,9 @@ export function classifyDegreeRequirement(text = '') {
   const detectedKeywords = [];
 
   // 1. Explicit Prohibition against MCA / BCA (Highest precedence strict restriction)
-  const strictMcaExclusion = normalized.match(/\b(?:mca|bca)\b[^\n.!?]{0,60}\b(?:need\s+not\s+apply|not\s+eligible|ineligible|not\s+accepted)\b/i);
+  const strictMcaExclusion =
+    normalized.match(/\b(?:mca|bca)\b[^\n.!?]{0,60}\b(?:need\s+not\s+apply|not\s+eligible|ineligible|not\s+accepted|excluded)\b/i) ||
+    normalized.match(/\b(?:no|not|without|excluding|except)\s+(?:mca|bca)\b/i);
   if (strictMcaExclusion) {
     detectedKeywords.push(strictMcaExclusion[0]);
     return {

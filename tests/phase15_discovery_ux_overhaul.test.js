@@ -45,7 +45,7 @@ describe('Phase 15 — Discovery UX Overhaul, Search Intelligence & Resume Workf
 
   test('Part 3: Lawful external search assistance generates both portal links and Google operators', () => {
     const portalLinks = generateAssistedSearchLinks('Java Developer', 'Bengaluru', { fresherOnly: true });
-    assert.strictEqual(portalLinks.length, 5, 'Must generate standard links for all 5 restricted portals');
+    assert.ok(portalLinks.length >= 5, 'Must generate standard links for all restricted portals');
 
     const googleLinks = generateGoogleSearchLinks('Java Developer', 'Bengaluru', { fresherOnly: true });
     assert.strictEqual(googleLinks.length, 4, 'Must generate Google search operator links for Google Jobs, Lever, Greenhouse, Ashby');

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { runJobDiscovery } from './discovery/discoveryService.js';
+import { runCareerOsDailyWorkflow } from './scheduler/careerosDaily.js';
 import { getJobs, getStats, updateJobStatus } from './tracker/jobTracker.js';
 import { startDashboardServer } from './dashboard/server.js';
 import { getProfileMarkdown, loadCandidateProfile } from './profile/profileManager.js';
@@ -49,6 +50,18 @@ async function main() {
       const customQuery = queryArg ? queryArg.split('=')[1] : null;
       console.log('--- CareerOS: Starting Job Discovery ---');
       await runJobDiscovery({ customQuery });
+      break;
+    }
+
+    case 'daily': {
+      const skipSweep = args.includes('--skip-sweep');
+      const noDomainFetch = args.includes('--no-domain-fetch');
+      console.log('--- CareerOS Daily: Integrated Discovery, Contact Research & Outreach ---');
+      const report = await runCareerOsDailyWorkflow({
+        skipSweep,
+        fetchPublicDomain: !noDomainFetch
+      });
+      console.log(JSON.stringify(report, null, 2));
       break;
     }
 

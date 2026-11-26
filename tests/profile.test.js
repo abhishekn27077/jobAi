@@ -20,12 +20,12 @@ test('Candidate Profile loads verified information accurately', () => {
   const anudip = profile.experience.find(e => /Anudip/i.test(e.company));
   assert.ok(anudip, 'Anudip Foundation internship must be present');
   assert.match(anudip.role, /Java Full Stack/i);
+  assert.ok((anudip.bullets || []).some(b => /Leave Management/i.test(b)), 'Leave Management must be present under Anudip internship');
 
   // Projects verification
   const projectNames = profile.projects.map(p => p.name);
   assert.ok(projectNames.some(n => /NearVia/i.test(n)), 'NearVia must be present');
   assert.ok(projectNames.some(n => /FinSight/i.test(n)), 'FinSight must be present');
-  assert.ok(projectNames.some(n => /Leave Management/i.test(n)), 'Leave Management must be present');
   assert.ok(projectNames.some(n => /Smart Rover/i.test(n)), 'Smart Rover must be present');
   assert.ok(projectNames.some(n => /Aquaponics/i.test(n)), 'Aquaponics must be present');
   assert.ok(projectNames.some(n => /Drowsiness/i.test(n)), 'Drowsiness Detection must be present');

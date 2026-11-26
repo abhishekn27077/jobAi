@@ -3,12 +3,19 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getJobs, updateJobStatus, getStats, getScanHistory, saveOrUpdateJob } from '../tracker/jobTracker.js';
-import { runJobDiscovery } from '../discovery/discoveryService.js';
+import { runJobDiscovery, runCareerOsJobSweep } from '../discovery/discoveryService.js';
 import { executeUnifiedSearch } from '../discovery/unifiedSearchService.js';
-import { getAllSources, resolveSource, generateAssistedSearchLinks } from '../discovery/sourceRegistry.js';
+import { getAllSources, resolveSource, generateAssistedSearchLinks, getSourceHealthReport } from '../discovery/sourceRegistry.js';
+import { importJobsFromInput } from '../discovery/jobImportService.js';
 import { loadCandidateProfile } from '../profile/profileManager.js';
 import { exportTailoredDocumentsForJob, generateTailoredResume, generateTailoredCoverLetter } from '../resumes/resumeGenerator.js';
 import { launchFormAssistant } from '../automation/formAssistant.js';
+import {
+  listLocalChromeProfiles,
+  getChromeProfileConfig,
+  saveChromeProfileConfig,
+  getChromeConnectionStatus
+} from '../automation/chromeProfileConfig.js';
 import { generateInterviewDossier, saveInterviewSession } from '../interview/prepService.js';
 import { generateReferralMessage } from '../networking/referralAssistant.js';
 import { verifyVaultJobs } from '../matcher/jobVerifier.js';
@@ -31,11 +38,44 @@ import {
 import { prepareApplication, generateApplicationPackage } from '../automation/applicationWorkflow.js';
 import {
   discoverRecruitersForJob,
+  discoverContactsForJobAsync,
+  researchHiringTeamForJob,
   saveRecruiterContact,
   getRecruiterContacts,
   prepareContactOutreach,
-  updateContactOutreachStatus
+  updateContactOutreachStatus,
+  createOutreachDraft,
+  getOutreachDrafts,
+  updateOutreachDraft
 } from '../intelligence/recruiterDiscoveryService.js';
+import {
+  createAgentTask,
+  getAgentTask,
+  listAgentTasks,
+  pauseAgentTask,
+  resumeAgentTask,
+  cancelAgentTask,
+  retryAgentTask,
+  getAgentBridgeStatus,
+  buildApplyWithAiContext,
+  recoverStaleTasks
+} from '../agent/agentTaskManager.js';
+import {
+  AGENT_TOOL_DEFINITIONS,
+  executeAgentTool,
+  verifyAgentBridgeAuth
+} from '../agent/agentBridge.js';
+import { getUnifiedTimeline } from '../tracker/timelineService.js';
+import {
+  createApprovalRequest,
+  listApprovalRequests,
+  decideApprovalRequest
+} from '../tracker/approvalCenter.js';
+import {
+  getDriveIntegrationStatus,
+  uploadDocumentToDrive,
+  listDriveLinks
+} from '../drive/googleDriveService.js';
 import { assessApplicationReadiness } from '../automation/applicationReadiness.js';
 import {
   validateBatchQueue,
@@ -46,7 +86,7 @@ import {
 } from '../automation/batchSessionManager.js';
 import { checkResumeAtsQuality } from '../resumes/atsQualityChecker.js';
 import { saveScreeningAnswerOverride, getScreeningAnswersVault } from '../automation/screeningEngine.js';
-import { getApplications, getApplicationByJobId, updateApplicationStatus as updateAppStatus, getPortalSupportMatrix, checkDuplicateApplication } from '../tracker/applicationTracker.js';
+import { getApplications, getApplicationByJobId, updateApplicationStatus as updateAppStatus, undoSubmittedApplication, getPortalSupportMatrix, checkDuplicateApplication } from '../tracker/applicationTracker.js';
 import { getGoogleAuthUrl, disconnectAccount, getOAuthStatus, exchangeCodeForTokens } from '../email/googleOAuthClient.js';
 import { generateCommunicationDraft, saveDraftToVault, approveAndPublishDraft } from '../email/communicationAssistant.js';
 import { syncRecruiterEmails } from '../email/emailSyncService.js';
@@ -298,6 +338,24 @@ export function startDashboardServer(portOrOptions = 3000, hostParam = '127.0.0.
     if (pathname === '/api/stats' && req.method === 'GET') {
       try {
         const stats = getStats();
+        try {
+          const db = getDatabase();
+          const contactStats = db.prepare(`
+            SELECT COUNT(DISTINCT job_id) as jobsWithContacts, COUNT(*) as totalContacts
+            FROM recruiter_contacts
+            WHERE job_id IS NOT NULL
+          `).get();
+          const draftStats = db.prepare(`
+            SELECT COUNT(DISTINCT job_id) as jobsWithOutreachDrafts
+            FROM outreach_drafts
+            WHERE job_id IS NOT NULL
+          `).get();
+          stats.jobsWithContacts = contactStats?.jobsWithContacts || 0;
+          stats.totalContacts = contactStats?.totalContacts || 0;
+          stats.jobsWithOutreachDrafts = draftStats?.jobsWithOutreachDrafts || 0;
+        } catch {
+          // Non-fatal fallback
+        }
         sendJson(200, stats);
       } catch (e) {
         sendJson(500, { error: e.message });
@@ -410,32 +468,58 @@ export function startDashboardServer(portOrOptions = 3000, hostParam = '127.0.0.
       return;
     }
 
-    // POST /api/job/import-url (Direct User-Assisted Job Import)
+    // POST /api/job/import-url (Single URL or Search Results URL Import)
     if (pathname === '/api/job/import-url' && req.method === 'POST') {
       const body = await safeReadBody();
       if (body === null) return;
 
       try {
-        const { url, title, company, location, source, description } = body;
+        const { url, title, company, location, source, description, preview } = body;
         if (!url || typeof url !== 'string' || !url.startsWith('http')) {
           sendJson(400, { error: 'Bad Request: A valid HTTP/HTTPS URL is required.' });
           return;
         }
 
-        const sourceDef = resolveSource(source || url);
-        const importedJob = {
-          title: (title || 'Imported Job Opportunity').trim(),
-          company: (company || 'External Employer').trim(),
-          location: (location || 'Bengaluru, India').trim(),
-          url: url.trim(),
-          source: sourceDef.id,
-          sourceConfidence: sourceDef.tier === 'direct_ats' ? 1.0 : 0.85,
-          description: description || `Imported listing from ${sourceDef.name}: ${url}`,
-          status: 'discovered'
-        };
+        const result = await importJobsFromInput({
+          url,
+          title,
+          company,
+          location,
+          source,
+          description,
+          preview: Boolean(preview)
+        });
+        const first = result.items[0] || {};
+        sendJson(200, {
+          ...result,
+          jobId: first.jobId || first.existingJobId || null,
+          isNew: first.action === 'imported',
+          evaluation: first.evaluation || null
+        });
+      } catch (e) {
+        sendJson(500, { error: e.message });
+      }
+      return;
+    }
 
-        const result = saveOrUpdateJob(importedJob);
-        sendJson(200, { success: true, ...result });
+    // POST /api/jobs/import-batch (Batch URLs, JSON, CSV & Preview)
+    if (pathname === '/api/jobs/import-batch' && req.method === 'POST') {
+      const body = await safeReadBody();
+      if (body === null) return;
+
+      try {
+        const result = await importJobsFromInput(body || {});
+        sendJson(200, result);
+      } catch (e) {
+        sendJson(400, { error: e.message });
+      }
+      return;
+    }
+
+    // GET /api/sources/health
+    if (pathname === '/api/sources/health' && req.method === 'GET') {
+      try {
+        sendJson(200, { sources: getSourceHealthReport() });
       } catch (e) {
         sendJson(500, { error: e.message });
       }
@@ -468,13 +552,33 @@ export function startDashboardServer(portOrOptions = 3000, hostParam = '127.0.0.
       return;
     }
 
+    // POST /api/discovery/sweep (CAREEROS JOB SWEEP)
+    if (pathname === '/api/discovery/sweep' && req.method === 'POST') {
+      const body = await safeReadBody();
+      if (body === null) return;
+      try {
+        const result = await runCareerOsJobSweep({
+          customQuery: body?.query || null,
+          queries: Array.isArray(body?.queries) ? body.queries : null,
+          maxPerQuery: body?.maxPerQuery || 20
+        });
+        sendJson(200, result);
+      } catch (e) {
+        sendJson(500, { error: e.message });
+      }
+      return;
+    }
+
     // POST /api/scan
     if (pathname === '/api/scan' && req.method === 'POST') {
       const body = await safeReadBody();
       if (body === null) return;
 
       try {
-        const result = await runJobDiscovery({ customQuery: body.query || null });
+        const result = await runJobDiscovery({
+          customQuery: body.query || null,
+          queries: Array.isArray(body.queries) ? body.queries : null
+        });
         sendJson(200, result);
       } catch (e) {
         sendJson(500, { error: e.message });
@@ -754,6 +858,18 @@ export function startDashboardServer(portOrOptions = 3000, hostParam = '127.0.0.
         });
       } catch (e) {
         sendJson(e.statusCode || 500, { error: e.message });
+      }
+      return;
+    }
+
+    // POST /api/job/:id/application/undo
+    if (pathname.startsWith('/api/job/') && pathname.endsWith('/application/undo') && req.method === 'POST') {
+      try {
+        const jobId = parseValidId(pathname.split('/')[3], 'Job ID');
+        const result = undoSubmittedApplication(jobId);
+        sendJson(200, { success: true, application: result });
+      } catch (e) {
+        sendJson(400, { error: e.message });
       }
       return;
     }
@@ -2062,7 +2178,7 @@ export function startDashboardServer(portOrOptions = 3000, hostParam = '127.0.0.
     if (pathname.startsWith('/api/recruiter-hub/discover/') && req.method === 'POST') {
       try {
         const jobId = parseValidId(pathname.split('/')[4], 'Job ID');
-        const discovery = discoverRecruitersForJob(jobId);
+        const discovery = await discoverContactsForJobAsync(jobId, { fetchPublicDomain: true });
         sendJson(200, { success: true, ...discovery });
       } catch (e) {
         sendJson(400, { success: false, error: e.message });
@@ -2126,12 +2242,292 @@ export function startDashboardServer(portOrOptions = 3000, hostParam = '127.0.0.
       return;
     }
 
+    if (pathname.startsWith('/api/saved-searches/') && req.method === 'PATCH') {
+      const body = await safeReadBody();
+      if (body === null) return;
+      try {
+        const id = parseValidId(pathname.split('/')[3], 'Saved Search ID');
+        const newName = String(body.name || '').trim();
+        if (!newName) throw new Error('Search name is required.');
+        const db = getDatabase();
+        db.prepare('UPDATE saved_searches SET name = ? WHERE id = ?').run(newName, id);
+        sendJson(200, { success: true });
+      } catch (e) {
+        sendJson(400, { success: false, error: e.message });
+      }
+      return;
+    }
+
     if (pathname.startsWith('/api/saved-searches/') && req.method === 'DELETE') {
       try {
         const id = parseValidId(pathname.split('/')[3], 'Saved Search ID');
         const db = getDatabase();
         db.prepare('DELETE FROM saved_searches WHERE id = ?').run(id);
         sendJson(200, { success: true });
+      } catch (e) {
+        sendJson(400, { success: false, error: e.message });
+      }
+      return;
+    }
+
+    // ==========================================
+    // PHASE 15: AI AGENT TASKS, BRIDGE, OUTREACH, TIMELINE, APPROVALS & DRIVE
+    // ==========================================
+    if (pathname === '/api/agent/tasks' && req.method === 'GET') {
+      try {
+        const status = parsedUrl.searchParams.get('status') || null;
+        const jobId = parsedUrl.searchParams.get('jobId') ? parseValidId(parsedUrl.searchParams.get('jobId'), 'Job ID') : null;
+        sendJson(200, { success: true, tasks: listAgentTasks({ status, jobId }) });
+      } catch (e) {
+        sendJson(400, { success: false, error: e.message });
+      }
+      return;
+    }
+
+    if (pathname === '/api/agent/tasks' && req.method === 'POST') {
+      try {
+        const body = await readJsonBody(req);
+        const jobId = parseValidId(body.jobId, 'Job ID');
+        const result = createAgentTask({
+          jobId,
+          taskType: body.taskType || 'apply_with_ai',
+          instructions: body.instructions || '',
+          agentSessionRef: body.agentSessionRef || null
+        });
+        sendJson(200, { success: true, ...result });
+      } catch (e) {
+        sendJson(400, { success: false, error: e.message });
+      }
+      return;
+    }
+
+    if (pathname.startsWith('/api/agent/tasks/') && req.method === 'GET') {
+      try {
+        const taskId = parseValidId(pathname.split('/')[4], 'Task ID');
+        const task = getAgentTask(taskId);
+        if (!task) return sendJson(404, { success: false, error: 'Task not found.' });
+        const context = buildApplyWithAiContext(task.jobId);
+        sendJson(200, { success: true, task, context });
+      } catch (e) {
+        sendJson(400, { success: false, error: e.message });
+      }
+      return;
+    }
+
+    if (pathname.match(/^\/api\/agent\/tasks\/\d+\/(pause|resume|cancel|retry)$/) && req.method === 'POST') {
+      try {
+        const parts = pathname.split('/');
+        const taskId = parseValidId(parts[4], 'Task ID');
+        const action = parts[5];
+        const body = await readJsonBody(req).catch(() => ({}));
+        let task;
+        if (action === 'pause') task = pauseAgentTask(taskId, body.reason);
+        else if (action === 'resume') task = resumeAgentTask(taskId, body.reason);
+        else if (action === 'retry') task = retryAgentTask(taskId, body.reason);
+        else task = cancelAgentTask(taskId, body.reason);
+        sendJson(200, { success: true, task });
+      } catch (e) {
+        sendJson(400, { success: false, error: e.message });
+      }
+      return;
+    }
+
+    if (pathname === '/api/agent/status' && req.method === 'GET') {
+      try {
+        const chrome = await getChromeConnectionStatus();
+        sendJson(200, { success: true, bridge: getAgentBridgeStatus(), chrome });
+      } catch (e) {
+        sendJson(500, { success: false, error: e.message });
+      }
+      return;
+    }
+
+    if (pathname === '/api/chrome/status' && req.method === 'GET') {
+      try {
+        const chrome = await getChromeConnectionStatus();
+        sendJson(200, { success: true, ...chrome });
+      } catch (e) {
+        sendJson(500, { success: false, error: e.message });
+      }
+      return;
+    }
+
+    if (pathname === '/api/agent/bridge/tools' && req.method === 'GET') {
+      const auth = verifyAgentBridgeAuth(req.headers);
+      if (!auth.authorized) return sendJson(401, { success: false, error: auth.error });
+      sendJson(200, { success: true, tools: AGENT_TOOL_DEFINITIONS });
+      return;
+    }
+
+    if (pathname.startsWith('/api/agent/bridge/') && req.method === 'POST') {
+      const auth = verifyAgentBridgeAuth(req.headers);
+      if (!auth.authorized) return sendJson(401, { success: false, error: auth.error });
+      try {
+        const toolName = pathname.split('/')[4];
+        const args = await readJsonBody(req);
+        const result = await executeAgentTool(toolName, args);
+        sendJson(200, { success: true, tool: toolName, result });
+      } catch (e) {
+        sendJson(400, { success: false, error: e.message });
+      }
+      return;
+    }
+
+    if (pathname.startsWith('/api/recruiters/research/') && req.method === 'GET') {
+      try {
+        const jobId = parseValidId(pathname.split('/')[4], 'Job ID');
+        sendJson(200, { success: true, ...researchHiringTeamForJob(jobId) });
+      } catch (e) {
+        sendJson(400, { success: false, error: e.message });
+      }
+      return;
+    }
+
+    if (pathname === '/api/outreach/drafts' && req.method === 'GET') {
+      try {
+        const jobId = parsedUrl.searchParams.get('jobId') ? parseValidId(parsedUrl.searchParams.get('jobId'), 'Job ID') : null;
+        const contactId = parsedUrl.searchParams.get('contactId') ? parseValidId(parsedUrl.searchParams.get('contactId'), 'Contact ID') : null;
+        sendJson(200, { success: true, drafts: getOutreachDrafts({ jobId, contactId }) });
+      } catch (e) {
+        sendJson(400, { success: false, error: e.message });
+      }
+      return;
+    }
+
+    if (pathname === '/api/outreach/drafts' && req.method === 'POST') {
+      try {
+        const body = await readJsonBody(req);
+        const result = createOutreachDraft({
+          jobId: body.jobId ? parseValidId(body.jobId, 'Job ID') : null,
+          contactId: body.contactId ? parseValidId(body.contactId, 'Contact ID') : null,
+          taskId: body.taskId ? parseValidId(body.taskId, 'Task ID') : null,
+          channel: body.channel || 'email',
+          recipientName: body.recipientName || 'Hiring Team',
+          recipientEmail: body.recipientEmail || '',
+          subject: body.subject || '',
+          body: body.body || '',
+          evidence: Array.isArray(body.evidence) ? body.evidence : []
+        });
+        sendJson(200, { success: true, ...result });
+      } catch (e) {
+        sendJson(400, { success: false, error: e.message });
+      }
+      return;
+    }
+
+    if (pathname.startsWith('/api/outreach/drafts/') && req.method === 'PATCH') {
+      try {
+        const draftId = parseValidId(pathname.split('/')[4], 'Draft ID');
+        const body = await readJsonBody(req);
+        const draft = updateOutreachDraft(draftId, { subject: body.subject, body: body.body });
+        sendJson(200, { success: true, draft });
+      } catch (e) {
+        sendJson(400, { success: false, error: e.message });
+      }
+      return;
+    }
+
+    if (pathname === '/api/approvals' && req.method === 'GET') {
+      try {
+        const status = parsedUrl.searchParams.get('status') || null;
+        const jobId = parsedUrl.searchParams.get('jobId') ? parseValidId(parsedUrl.searchParams.get('jobId'), 'Job ID') : null;
+        sendJson(200, { success: true, approvals: listApprovalRequests({ status, jobId }) });
+      } catch (e) {
+        sendJson(400, { success: false, error: e.message });
+      }
+      return;
+    }
+
+    if (pathname === '/api/approvals' && req.method === 'POST') {
+      try {
+        const body = await readJsonBody(req);
+        const approval = createApprovalRequest(body);
+        sendJson(200, { success: true, approval });
+      } catch (e) {
+        sendJson(400, { success: false, error: e.message });
+      }
+      return;
+    }
+
+    if (pathname.match(/^\/api\/approvals\/\d+\/decide$/) && req.method === 'POST') {
+      try {
+        const approvalId = parseValidId(pathname.split('/')[3], 'Approval ID');
+        const body = await readJsonBody(req);
+        const approval = decideApprovalRequest(approvalId, {
+          decision: body.decision,
+          editedContent: body.editedContent ?? null,
+          decisionNote: body.decisionNote || '',
+          userConfirmed: body.userConfirmed === true
+        });
+        sendJson(200, { success: true, approval });
+      } catch (e) {
+        sendJson(400, { success: false, error: e.message });
+      }
+      return;
+    }
+
+    if (pathname.startsWith('/api/timeline/') && req.method === 'GET') {
+      try {
+        const jobId = parseValidId(pathname.split('/')[3], 'Job ID');
+        sendJson(200, { success: true, ...getUnifiedTimeline(jobId) });
+      } catch (e) {
+        sendJson(400, { success: false, error: e.message });
+      }
+      return;
+    }
+
+    if (pathname === '/api/drive/status' && req.method === 'GET') {
+      sendJson(200, { success: true, ...getDriveIntegrationStatus() });
+      return;
+    }
+
+    if (pathname === '/api/chrome/profiles' && req.method === 'GET') {
+      try {
+        const config = getChromeProfileConfig();
+        const profiles = listLocalChromeProfiles(config.userDataDir);
+        sendJson(200, { success: true, config, profiles });
+      } catch (e) {
+        sendJson(400, { success: false, error: e.message });
+      }
+      return;
+    }
+
+    if (pathname === '/api/chrome/profile' && req.method === 'POST') {
+      try {
+        const body = await readJsonBody(req);
+        const config = saveChromeProfileConfig({
+          enabled: body.enabled !== false,
+          profileDirectory: body.profileDirectory || 'Profile 21',
+          profileLabel: body.profileLabel || ''
+        });
+        sendJson(200, { success: true, config });
+      } catch (e) {
+        sendJson(400, { success: false, error: e.message });
+      }
+      return;
+    }
+
+    if (pathname === '/api/drive/links' && req.method === 'GET') {
+      try {
+        const jobId = parsedUrl.searchParams.get('jobId') ? parseValidId(parsedUrl.searchParams.get('jobId'), 'Job ID') : null;
+        sendJson(200, { success: true, links: listDriveLinks({ jobId }) });
+      } catch (e) {
+        sendJson(400, { success: false, error: e.message });
+      }
+      return;
+    }
+
+    if (pathname === '/api/drive/upload' && req.method === 'POST') {
+      try {
+        const body = await readJsonBody(req);
+        const link = await uploadDocumentToDrive({
+          jobId: body.jobId ? parseValidId(body.jobId, 'Job ID') : null,
+          applicationId: body.applicationId ? parseValidId(body.applicationId, 'Application ID') : null,
+          localPath: body.localPath,
+          docType: body.docType,
+          fileName: body.fileName || null
+        });
+        sendJson(200, { success: true, link });
       } catch (e) {
         sendJson(400, { success: false, error: e.message });
       }
@@ -2173,6 +2569,7 @@ export function startDashboardServer(portOrOptions = 3000, hostParam = '127.0.0.
 
   try {
     initializeAutomationEngine({ runStartupChecks: false });
+    recoverStaleTasks();
   } catch (err) {
     console.warn('[Dashboard] Could not initialize automation engine:', err.message);
   }
